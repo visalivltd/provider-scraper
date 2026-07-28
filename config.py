@@ -75,8 +75,42 @@ CRAWL_KEYWORDS = [
     "work-with-us",
 ]
 
-MAX_CRAWL_PAGES = 8
-PAGE_TIMEOUT_MS = 15000
+# Performance & Optimization Settings
+NUM_WORKERS = 8
+MAX_CRAWL_PAGES = 10
+PAGE_TIMEOUT_MS = 10000
+
+# Resource Interception Blocklist
+BLOCKED_RESOURCE_TYPES = ["image", "media", "font", "stylesheet"]
+
+# Irrelevant Path Keywords to Ignore During Crawling
+IRRELEVANT_PATH_KEYWORDS = [
+    "blog",
+    "blogs",
+    "news",
+    "gallery",
+    "galleries",
+    "photo",
+    "photos",
+    "privacy",
+    "privacy-policy",
+    "terms",
+    "terms-of-use",
+    "terms-and-conditions",
+    "cookie",
+    "cookies",
+    "testimonial",
+    "testimonials",
+    "review",
+    "reviews",
+    "press",
+    "event",
+    "events",
+    "post",
+    "posts",
+    "article",
+    "articles",
+]
 
 # Email Extraction Keywords
 HR_KEYWORDS = ["hr", "humanresources", "human resources", "people", "talent"]

@@ -212,6 +212,17 @@ def _extract_emails_from_text_block(text: str) -> List[str]:
     return emails
 
 
+def is_all_categories_found(categorized_dict: Dict[str, str]) -> bool:
+    """
+    Returns True if all 5 email categories (HR Email, Recruitment Email, Manager Email, Careers Email, General Email)
+    have at least one extracted email address.
+    """
+    return all(
+        bool(categorized_dict.get(cat, "").strip())
+        for cat in ["HR Email", "Recruitment Email", "Manager Email", "Careers Email", "General Email"]
+    )
+
+
 def _categorize_email(email: str) -> str:
     """
     Categorizes an email address for output:
