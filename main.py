@@ -78,10 +78,10 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
             if not website_url:
                 record["Status"] = "Failed"
-                record["Failure Reason"] = "Website not found"
+                record["Failure Reason"] = "Official website not found"
                 print("Website selected: None")
-                print("Processing status: Failed (Website not found)")
-                logger.warning(f"[{service_num}/{total_services}] Website selected: None. Status: Failed (Website not found)")
+                print("Processing status: Failed (Official website not found)")
+                logger.warning(f"[{service_num}/{total_services}] Website selected: None. Status: Failed (Official website not found)")
                 results.append(record)
                 continue
 
@@ -91,22 +91,29 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
             # Smart Crawling
             print("Crawling website pages...")
-            pages_data = crawl_website(website_url)
+            pages_data, crawl_failure_reason = crawl_website(website_url)
             print(f"Pages crawled: {len(pages_data)}")
             logger.info(f"[{service_num}/{total_services}] Pages crawled: {len(pages_data)}")
 
             if not pages_data:
                 record["Status"] = "Failed"
-                record["Failure Reason"] = "No email found"
+                record["Failure Reason"] = crawl_failure_reason if crawl_failure_reason else "Website not reachable"
                 print("Emails extracted: None")
-                print("Processing status: Failed (No email found)")
-                logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Status: Failed (No email found)")
+                print(f"Processing status: Failed ({record['Failure Reason']})")
+                logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Status: Failed ({record['Failure Reason']})")
                 results.append(record)
                 continue
 
             # Email Extraction
             print("Extracting emails...")
-            email_results = extract_and_categorize_emails(pages_data)
+            try:
+                email_results = extract_and_categorize_emails(pages_data)
+            except Exception as extract_exc:
+                logger.error(f"Email extraction failed for {website_url}: {extract_exc}")
+                record["Status"] = "Failed"
+                record["Failure Reason"] = "Email extraction failed"
+                results.append(record)
+                continue
 
             record["HR Email"] = email_results.get("HR Email", "")
             record["Recruitment Email"] = email_results.get("Recruitment Email", "")
@@ -133,9 +140,9 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
                 )
             else:
                 record["Status"] = "Failed"
-                record["Failure Reason"] = "No email found"
+                record["Failure Reason"] = crawl_failure_reason if crawl_failure_reason else "Website accessible but no email available"
                 print("Emails extracted: None")
-                logger.info(f"[{service_num}/{total_services}] Emails extracted: None")
+                logger.info(f"[{service_num}/{total_services}] Emails extracted: None. Reason: {record['Failure Reason']}")
 
             print(f"Processing status: {record['Status']} | Failure Reason: '{record['Failure Reason']}'")
             logger.info(f"[{service_num}/{total_services}] Processing status: {record['Status']} | Reason: '{record['Failure Reason']}'")
@@ -159,8 +166,6 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df["General Email"] = [r["General Email"] for r in results]
     df["Status"] = [r["Status"] for r in results]
     df["Failure Reason"] = [r["Failure Reason"] for r in results]
-
-    return df
 
     return df
 
