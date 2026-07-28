@@ -215,30 +215,36 @@ def _extract_emails_from_text_block(text: str) -> List[str]:
 def _categorize_email(email: str) -> str:
     """
     Categorizes an email address for output:
-    - HR Email: username contains 'hr' or 'humanresources'
-    - Recruitment Email: username contains 'recruitment', 'recruiter', 'talent', 'hiring'
+    - HR Email: username contains 'hr', 'humanresources', 'people'
+    - Recruitment Email: username contains 'recruitment', 'recruiter', 'hiring', 'talent'
+    - Manager Email: username contains 'manager', 'director', 'owner', 'administrator', 'admin', 'managingdirector'
     - Careers Email: username contains 'career', 'careers', 'jobs', 'vacancy', 'vacancies'
-    - General Email: everything else (includes manager, director, owner, support, info, contact, hello, office, enquiries, referrals, admin, etc.)
+    - General Email: any valid business email that does not match the above categories.
     """
     email_clean = email.lower()
     username = email_clean.split("@")[0]
 
     # 1. Recruitment Email check
-    for kw in ["recruitment", "recruiter", "talent", "hiring"]:
+    for kw in ["recruitment", "recruiter", "hiring", "talent"]:
         if kw in username:
             return "Recruitment Email"
 
     # 2. HR Email check
-    for kw in ["hr", "humanresources"]:
+    for kw in ["hr", "humanresources", "people"]:
         if kw in username:
             return "HR Email"
 
-    # 3. Careers Email check
+    # 3. Manager Email check
+    for kw in ["manager", "director", "owner", "administrator", "admin", "managingdirector"]:
+        if kw in username:
+            return "Manager Email"
+
+    # 4. Careers Email check
     for kw in ["career", "careers", "jobs", "vacancy", "vacancies"]:
         if kw in username:
             return "Careers Email"
 
-    # 4. General Email fallback (everything else)
+    # 5. General Email fallback (everything else)
     return "General Email"
 
 
@@ -251,7 +257,7 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     4. Preserve all valid business email addresses regardless of username (support, info, contact, enquiries, referrals, manager, etc.).
     5. Log detailed per-page extraction results (URL, HTTP Status, emails found, emails ignored, reasons).
     6. Prioritize Service Website domain emails (@examplecare.co.uk) over all other domains.
-    7. Categorize valid emails into HR Email, Recruitment Email, Careers Email, and General Email.
+    7. Categorize valid emails into HR Email, Recruitment Email, Manager Email, Careers Email, and General Email.
     8. Perform cross-category and intra-category deduplication.
     """
     all_page_candidates: List[Tuple[str, str]] = []  # List of (email, page_url)
@@ -353,6 +359,7 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     categorized: Dict[str, Set[str]] = {
         "HR Email": set(),
         "Recruitment Email": set(),
+        "Manager Email": set(),
         "Careers Email": set(),
         "General Email": set(),
     }
@@ -361,14 +368,20 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
         category = _categorize_email(email)
         categorized[category].add(email)
 
-    # Cross-category deduplication: remove emails in HR/Recruitment/Careers from General Email
-    specific_emails = categorized["HR Email"] | categorized["Recruitment Email"] | categorized["Careers Email"]
+    # Cross-category deduplication: remove emails in specific categories from General Email
+    specific_emails = (
+        categorized["HR Email"] |
+        categorized["Recruitment Email"] |
+        categorized["Manager Email"] |
+        categorized["Careers Email"]
+    )
     categorized["General Email"] = categorized["General Email"] - specific_emails
 
     # Format output dictionary
     result = {
         "HR Email": ", ".join(sorted(categorized["HR Email"])),
         "Recruitment Email": ", ".join(sorted(categorized["Recruitment Email"])),
+        "Manager Email": ", ".join(sorted(categorized["Manager Email"])),
         "Careers Email": ", ".join(sorted(categorized["Careers Email"])),
         "General Email": ", ".join(sorted(categorized["General Email"])),
     }
@@ -377,7 +390,8 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     logger.info(
         f"Overall Email Extraction Complete. Total unique valid emails: {total_found} | "
         f"HR: '{result['HR Email']}' | Recruitment: '{result['Recruitment Email']}' | "
-        f"Careers: '{result['Careers Email']}' | General: '{result['General Email']}'"
+        f"Manager: '{result['Manager Email']}' | Careers: '{result['Careers Email']}' | "
+        f"General: '{result['General Email']}'"
     )
 
     return result

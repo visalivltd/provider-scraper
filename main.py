@@ -48,8 +48,11 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
             "Service Website": "",
             "HR Email": "",
             "Recruitment Email": "",
+            "Manager Email": "",
             "Careers Email": "",
             "General Email": "",
+            "Status": "Failed",
+            "Failure Reason": "",
         }
 
         print(f"\n[{service_num}/{total_services}] Current service: '{service_name}' (Postcode: '{postcode or 'N/A'}')")
@@ -74,9 +77,11 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
             logger.info(f"[{service_num}/{total_services}] Website source: {website_source}")
 
             if not website_url:
+                record["Status"] = "Failed"
+                record["Failure Reason"] = "Website not found"
                 print("Website selected: None")
-                print(f"Processing status: {config.STATUS_WEBSITE_NOT_FOUND}")
-                logger.warning(f"[{service_num}/{total_services}] Website selected: None. Processing status: {config.STATUS_WEBSITE_NOT_FOUND}")
+                print("Processing status: Failed (Website not found)")
+                logger.warning(f"[{service_num}/{total_services}] Website selected: None. Status: Failed (Website not found)")
                 results.append(record)
                 continue
 
@@ -91,9 +96,11 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
             logger.info(f"[{service_num}/{total_services}] Pages crawled: {len(pages_data)}")
 
             if not pages_data:
+                record["Status"] = "Failed"
+                record["Failure Reason"] = "No email found"
                 print("Emails extracted: None")
-                print(f"Processing status: {config.STATUS_NO_EMAIL_FOUND}")
-                logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Processing status: {config.STATUS_NO_EMAIL_FOUND}")
+                print("Processing status: Failed (No email found)")
+                logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Status: Failed (No email found)")
                 results.append(record)
                 continue
 
@@ -103,34 +110,42 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
             record["HR Email"] = email_results.get("HR Email", "")
             record["Recruitment Email"] = email_results.get("Recruitment Email", "")
+            record["Manager Email"] = email_results.get("Manager Email", "")
             record["Careers Email"] = email_results.get("Careers Email", "")
             record["General Email"] = email_results.get("General Email", "")
 
-            has_any_email = any(record[k] for k in ["HR Email", "Recruitment Email", "Careers Email", "General Email"])
-            status = config.STATUS_SUCCESS if has_any_email else config.STATUS_NO_EMAIL_FOUND
+            has_any_email = any(
+                record[k]
+                for k in ["HR Email", "Recruitment Email", "Manager Email", "Careers Email", "General Email"]
+            )
 
             if has_any_email:
+                record["Status"] = "Success"
+                record["Failure Reason"] = ""
                 print(
                     f"Emails extracted: HR='{record['HR Email']}', Recruitment='{record['Recruitment Email']}', "
-                    f"Careers='{record['Careers Email']}', General='{record['General Email']}'"
+                    f"Manager='{record['Manager Email']}', Careers='{record['Careers Email']}', General='{record['General Email']}'"
                 )
                 logger.info(
                     f"[{service_num}/{total_services}] Emails extracted: HR='{record['HR Email']}', "
-                    f"Recruitment='{record['Recruitment Email']}', Careers='{record['Careers Email']}', "
-                    f"General='{record['General Email']}'"
+                    f"Recruitment='{record['Recruitment Email']}', Manager='{record['Manager Email']}', "
+                    f"Careers='{record['Careers Email']}', General='{record['General Email']}'"
                 )
             else:
+                record["Status"] = "Failed"
+                record["Failure Reason"] = "No email found"
                 print("Emails extracted: None")
                 logger.info(f"[{service_num}/{total_services}] Emails extracted: None")
 
-            print(f"Processing status: {status}")
-            logger.info(f"[{service_num}/{total_services}] Processing status: {status}")
+            print(f"Processing status: {record['Status']} | Failure Reason: '{record['Failure Reason']}'")
+            logger.info(f"[{service_num}/{total_services}] Processing status: {record['Status']} | Reason: '{record['Failure Reason']}'")
 
         except Exception as exc:
+            record["Status"] = "Failed"
+            record["Failure Reason"] = str(exc)
             logger.error(f"[{service_num}/{total_services}] Failed processing '{service_name}': {exc}")
             print(f"Error processing service '{service_name}': {exc}")
-            print(f"Processing status: {config.STATUS_FAILED}")
-            # website_url is always defined (initialized to "" above), safe to use here
+            print(f"Processing status: Failed ({exc})")
             record["Service Website"] = website_url
 
         results.append(record)
@@ -139,8 +154,13 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df[config.WEBSITE_COLUMN] = [r["Service Website"] for r in results]
     df["HR Email"] = [r["HR Email"] for r in results]
     df["Recruitment Email"] = [r["Recruitment Email"] for r in results]
+    df["Manager Email"] = [r["Manager Email"] for r in results]
     df["Careers Email"] = [r["Careers Email"] for r in results]
     df["General Email"] = [r["General Email"] for r in results]
+    df["Status"] = [r["Status"] for r in results]
+    df["Failure Reason"] = [r["Failure Reason"] for r in results]
+
+    return df
 
     return df
 

@@ -23,14 +23,17 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
     # Ensure parent directory exists
     os.makedirs(output_path.parent, exist_ok=True)
 
-    # Define exact required 6 output columns
+    # Define exact required 9 output columns
     standard_columns = [
         config.REQUIRED_COLUMN,  # "Service Name"
         config.WEBSITE_COLUMN,   # "Service Website"
         "HR Email",
         "Recruitment Email",
+        "Manager Email",
         "Careers Email",
         "General Email",
+        "Status",
+        "Failure Reason",
     ]
 
     # Ensure all required standard columns exist in the DataFrame
