@@ -78,7 +78,7 @@ CRAWL_KEYWORDS = [
 # Performance & Optimization Settings
 NUM_WORKERS = 8
 MAX_CRAWL_PAGES = 10
-PAGE_TIMEOUT_MS = 10000
+PAGE_TIMEOUT_MS = 20000
 
 # Resource Interception Blocklist
 BLOCKED_RESOURCE_TYPES = ["image", "media", "font", "stylesheet"]
