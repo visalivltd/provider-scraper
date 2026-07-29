@@ -155,10 +155,47 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
     return service_num, record
 
 
+def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_services: int, is_final: bool = False) -> None:
+    """
+    Saves current in-memory results snapshot to disk (all 3 Excel files).
+    ThreadPoolExecutor safe: called ONLY from the main thread.
+    """
+    if not results_map:
+        return
+
+    try:
+        completed_count = len(results_map)
+        sorted_indices = sorted(results_map.keys())
+
+        rows = []
+        for idx in sorted_indices:
+            row_dict = df.iloc[idx - 1].to_dict()
+            rec = results_map[idx]
+            row_dict[config.WEBSITE_COLUMN] = rec.get("Service Website", "")
+            row_dict["HR Email"] = rec.get("HR Email", "")
+            row_dict["Recruitment Email"] = rec.get("Recruitment Email", "")
+            row_dict["Manager Email"] = rec.get("Manager Email", "")
+            row_dict["Careers Email"] = rec.get("Careers Email", "")
+            row_dict["General Email"] = rec.get("General Email", "")
+            row_dict["Status"] = rec.get("Status", "Failed")
+            row_dict["Failure Reason"] = rec.get("Failure Reason", "")
+            rows.append(row_dict)
+
+        snapshot_df = pd.DataFrame(rows)
+        save_enriched_excel(snapshot_df)
+
+        if not is_final:
+            logger.info(f"Checkpoint saved ({completed_count}/{total_services})")
+            print(f"Checkpoint saved ({completed_count}/{total_services})")
+    except Exception as exc:
+        logger.error(f"Failed to save checkpoint ({len(results_map)}/{total_services}): {exc}")
+
+
 def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """
     Parallel processing of the service dataset using ThreadPoolExecutor.
     Maintains 100% row order matching the input DataFrame.
+    Automatically saves checkpoints every 30 processed services and upon interrupt/exception.
     """
     total_services = len(df)
     logger.info(f"Starting parallel enrichment process for {total_services} services using {config.NUM_WORKERS} worker threads...")
@@ -173,26 +210,46 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     results_map: Dict[int, dict] = {}
+    last_saved_count = 0
+    checkpoint_interval = getattr(config, "CHECKPOINT_INTERVAL", 30)
 
-    with ThreadPoolExecutor(max_workers=config.NUM_WORKERS) as executor:
-        futures = {executor.submit(process_single_service, task): task[0] for task in tasks}
-        for future in as_completed(futures):
-            service_num = futures[future]
-            try:
-                idx, record = future.result()
-                results_map[idx] = record
-            except Exception as exc:
-                logger.error(f"Worker thread for service #{service_num} raised an unhandled exception: {exc}")
-                results_map[service_num] = {
-                    "Service Website": "",
-                    "HR Email": "",
-                    "Recruitment Email": "",
-                    "Manager Email": "",
-                    "Careers Email": "",
-                    "General Email": "",
-                    "Status": "Failed",
-                    "Failure Reason": str(exc),
-                }
+    try:
+        with ThreadPoolExecutor(max_workers=config.NUM_WORKERS) as executor:
+            futures = {executor.submit(process_single_service, task): task[0] for task in tasks}
+            for future in as_completed(futures):
+                service_num = futures[future]
+                try:
+                    idx, record = future.result()
+                    results_map[idx] = record
+                except Exception as exc:
+                    logger.error(f"Worker thread for service #{service_num} raised an unhandled exception: {exc}")
+                    results_map[service_num] = {
+                        "Service Website": "",
+                        "HR Email": "",
+                        "Recruitment Email": "",
+                        "Manager Email": "",
+                        "Careers Email": "",
+                        "General Email": "",
+                        "Status": "Failed",
+                        "Failure Reason": str(exc),
+                    }
+
+                completed_count = len(results_map)
+                if completed_count % checkpoint_interval == 0 and completed_count > last_saved_count and completed_count < total_services:
+                    _save_checkpoint(df, results_map, total_services, is_final=False)
+                    last_saved_count = completed_count
+
+    except KeyboardInterrupt:
+        logger.warning(f"Execution interrupted by user (KeyboardInterrupt). Saving checkpoint for {len(results_map)} processed rows...")
+        _save_checkpoint(df, results_map, total_services, is_final=False)
+        raise
+    except Exception as exc:
+        logger.error(f"Execution interrupted by exception: {exc}. Saving checkpoint for {len(results_map)} processed rows...")
+        _save_checkpoint(df, results_map, total_services, is_final=False)
+        raise
+
+    # Final save when all rows finish
+    _save_checkpoint(df, results_map, total_services, is_final=True)
 
     # Ensure 100% order preservation matching input DataFrame
     ordered_results = [results_map[i] for i in range(1, total_services + 1)]
@@ -231,9 +288,6 @@ def main():
 
         # 2. Process & enrich service dataset
         enriched_df = process_service_dataset(df)
-
-        # 3. Save clean 9-column output Excel file
-        save_enriched_excel(enriched_df)
 
     except Exception as e:
         logger.error(f"Application execution failed: {e}")

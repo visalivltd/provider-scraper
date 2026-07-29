@@ -79,6 +79,7 @@ CRAWL_KEYWORDS = [
 NUM_WORKERS = 8
 MAX_CRAWL_PAGES = 10
 PAGE_TIMEOUT_MS = 20000
+CHECKPOINT_INTERVAL = 30
 
 # Resource Interception Blocklist
 BLOCKED_RESOURCE_TYPES = ["image", "media", "font", "stylesheet"]
