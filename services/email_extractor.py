@@ -77,6 +77,21 @@ REGULATOR_GOV_NHS_DOMAINS = {
     "gov.scot",
 }
 
+# List of keywords in local part (before @) to ignore (case-insensitive exact & partial matches)
+BLOCKED_USERNAME_KEYWORDS = [
+    "referrals",
+    "complaints",
+    "info",
+    "supporter",
+    "enquiries",
+    "creditcontrol",
+    "pricing",
+    "campaigning",
+    "media",
+    "feedback",
+    "customerservices",
+]
+
 # High priority DOM section selectors for targeted contact extraction
 PRIORITY_SECTION_SELECTOR = (
     "footer, header, main, address, .contact, .contact-us, .contact-info, "
@@ -103,8 +118,9 @@ def _get_root_domain(host_or_domain: str) -> str:
 def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
     """
     Evaluates an email address and returns (is_valid, ignore_reason).
-    NOTE: All valid business email usernames (support, info, contact, enquiries, referrals, manager, etc.)
-    are explicitly allowed and preserved.
+    Filters out emails matching blocked local part keywords (exact & partial match),
+    dummy/test email blocklists, asset extensions, technical/analytics domains,
+    and NHS/Gov domains. Valid role emails (hr, recruitment, manager, careers, etc.) are preserved.
     """
     if not email or "@" not in email:
         return False, "Invalid email format"
@@ -127,6 +143,11 @@ def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
     if username in {"noreply", "no-reply", "unsubscribe"}:
         return False, "Automated no-reply address"
 
+    # Filter out emails whose local part (before @) contains blocked keywords (case-insensitive exact or partial match)
+    for kw in BLOCKED_USERNAME_KEYWORDS:
+        if kw in username:
+            return False, f"Username contains ignored keyword ('{kw}')"
+
     # Check technical / analytics / social domains
     for tech in TECHNICAL_DOMAINS:
         if domain == tech or domain.endswith(f".{tech}") or tech in domain:
@@ -141,6 +162,7 @@ def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
         return False, "Government or NHS domain suffix"
 
     return True, "Valid"
+
 
 
 def _clean_dom_tree(soup: BeautifulSoup) -> None:
@@ -265,7 +287,7 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     1. Parse HTML, clean non-visible tags, scripts, styles, comments, and hidden elements.
     2. Extract emails from: mailto links, priority contact/header/footer sections, full visible text, and raw HTML source.
     3. Normalize obfuscated email formats into standard email addresses.
-    4. Preserve all valid business email addresses regardless of username (support, info, contact, enquiries, referrals, manager, etc.).
+    4. Filter out emails matching blocked/ignored local part keywords (info, enquiries, complaints, referrals, etc.) while preserving valid role emails (hr, recruitment, manager, careers, etc.).
     5. Log detailed per-page extraction results (URL, HTTP Status, emails found, emails ignored, reasons).
     6. Prioritize Service Website domain emails (@examplecare.co.uk) over all other domains.
     7. Categorize valid emails into HR Email, Recruitment Email, Manager Email, Careers Email, and General Email.

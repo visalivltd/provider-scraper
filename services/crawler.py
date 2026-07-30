@@ -423,7 +423,7 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
             elif err_reason:
                 crawl_reason = err_reason
             else:
-                crawl_reason = "Website accessible but no email available"
+                crawl_reason = "Didn't find valid email"
 
             logger.debug(f"[DEBUG] Exact reason crawl stopped: Candidate loop finished, result: '{crawl_reason}'")
             return pages_data, crawl_reason
@@ -437,4 +437,4 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
     except Exception as exc:
         logger.error(f"Playwright execution failed for {target_base}: {exc}")
         logger.debug(f"[DEBUG] Exact reason crawl stopped: Playwright exception ({exc})")
-        return pages_data, "Website not reachable" if not pages_data else "Website accessible but no email available"
+        return pages_data, "Website not reachable" if not pages_data else "Didn't find valid email"

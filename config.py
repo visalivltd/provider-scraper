@@ -120,6 +120,17 @@ CAREERS_KEYWORDS = ["jobs", "career", "careers", "vacancy", "vacancies", "join",
 GENERAL_KEYWORDS = ["info", "office", "admin", "contact", "enquiries", "enquiry", "hello", "helpdesk"]
 
 IGNORE_KEYWORDS = [
+    "referrals",
+    "complaints",
+    "info",
+    "supporter",
+    "enquiries",
+    "creditcontrol",
+    "pricing",
+    "campaigning",
+    "media",
+    "feedback",
+    "customerservices",
     "marketing",
     "sales",
     "finance",
@@ -141,7 +152,7 @@ IGNORE_KEYWORDS = [
 # Status Constants
 STATUS_SUCCESS = "Success"
 STATUS_WEBSITE_NOT_FOUND = "Website Not Found"
-STATUS_NO_EMAIL_FOUND = "No Email Found"
+STATUS_NO_EMAIL_FOUND = "Didn't find valid email"
 STATUS_FAILED = "Failed"
 
 

@@ -132,7 +132,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                     record["Failure Reason"] = ""
                 else:
                     record["Status"] = "Failed"
-                    record["Failure Reason"] = crawl_failure_reason if crawl_failure_reason else "Website accessible but no email available"
+                    record["Failure Reason"] = crawl_failure_reason if (crawl_failure_reason and crawl_failure_reason not in {"Website accessible but no email available", "No email found"}) else "Didn't find valid email"
 
                 logger.info(f"[{service_num}/{total_services}] Status: {record['Status']} | Reason: '{record['Failure Reason']}'")
 
