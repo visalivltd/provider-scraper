@@ -81,15 +81,13 @@ REGULATOR_GOV_NHS_DOMAINS = {
 BLOCKED_USERNAME_KEYWORDS = [
     "referrals",
     "complaints",
-    "info",
     "supporter",
-    "enquiries",
-    "creditcontrol",
     "pricing",
     "campaigning",
     "media",
     "feedback",
     "customerservices",
+    "creditcontrol",
 ]
 
 # High priority DOM section selectors for targeted contact extraction
@@ -143,10 +141,10 @@ def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
     if username in {"noreply", "no-reply", "unsubscribe"}:
         return False, "Automated no-reply address"
 
-    # Filter out emails whose local part (before @) contains blocked keywords (case-insensitive exact or partial match)
+    # Filter out emails whose local part (before @) starts with blocked keywords
     for kw in BLOCKED_USERNAME_KEYWORDS:
-        if kw in username:
-            return False, f"Username contains ignored keyword ('{kw}')"
+        if username.startswith(kw):
+            return False, f"Username starts with ignored keyword ('{kw}')"
 
     # Check technical / analytics / social domains
     for tech in TECHNICAL_DOMAINS:
@@ -236,48 +234,60 @@ def _extract_emails_from_text_block(text: str) -> List[str]:
 
 def is_all_categories_found(categorized_dict: Dict[str, str]) -> bool:
     """
-    Returns True if all 5 email categories (HR Email, Recruitment Email, Manager Email, Careers Email, General Email)
+    Returns True if all 6 email categories (HR Email, Recruitment Email, Careers Email, Manager Email, Info Email, General Email)
     have at least one extracted email address.
     """
     return all(
         bool(categorized_dict.get(cat, "").strip())
-        for cat in ["HR Email", "Recruitment Email", "Manager Email", "Careers Email", "General Email"]
+        for cat in ["HR Email", "Recruitment Email", "Careers Email", "Manager Email", "Info Email", "General Email"]
     )
 
 
 def _categorize_email(email: str) -> str:
     """
-    Categorizes an email address for output:
-    - HR Email: username contains 'hr', 'humanresources', 'people'
-    - Recruitment Email: username contains 'recruitment', 'recruiter', 'hiring', 'talent'
-    - Manager Email: username contains 'manager', 'director', 'owner', 'administrator', 'admin', 'managingdirector'
-    - Careers Email: username contains 'career', 'careers', 'jobs', 'vacancy', 'vacancies'
-    - General Email: any valid business email that does not match the above categories.
+    Categorizes an email address for output based on strict priority order:
+    1. HR Email
+    2. Recruitment Email
+    3. Careers Email
+    4. Manager Email
+    5. Info Email
+    6. General Email
     """
     email_clean = email.lower()
     username = email_clean.split("@")[0]
 
-    # 1. Recruitment Email check
-    for kw in ["recruitment", "recruiter", "hiring", "talent"]:
-        if kw in username:
-            return "Recruitment Email"
-
-    # 2. HR Email check
+    # 1. HR Email check
     for kw in ["hr", "humanresources", "people"]:
         if kw in username:
             return "HR Email"
 
-    # 3. Manager Email check
-    for kw in ["manager", "director", "owner", "administrator", "admin", "managingdirector"]:
+    # 2. Recruitment Email check
+    for kw in ["recruitment", "recruiter", "hiring", "talent"]:
         if kw in username:
-            return "Manager Email"
+            return "Recruitment Email"
 
-    # 4. Careers Email check
+    # 3. Careers Email check
     for kw in ["career", "careers", "jobs", "vacancy", "vacancies"]:
         if kw in username:
             return "Careers Email"
 
-    # 5. General Email fallback (everything else)
+    # 4. Manager Email check
+    for kw in ["manager", "director", "owner", "administrator", "admin", "managingdirector"]:
+        if kw in username:
+            return "Manager Email"
+
+    # 5. Info Email check (emails beginning with info@ or local part starting with info)
+    if (
+        username == "info"
+        or username.startswith("info.")
+        or username.startswith("info_")
+        or username.startswith("info-")
+        or email_clean.startswith("info@")
+        or username.startswith("info")
+    ):
+        return "Info Email"
+
+    # 6. General Email fallback (everything else)
     return "General Email"
 
 
@@ -392,8 +402,9 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     categorized: Dict[str, Set[str]] = {
         "HR Email": set(),
         "Recruitment Email": set(),
-        "Manager Email": set(),
         "Careers Email": set(),
+        "Manager Email": set(),
+        "Info Email": set(),
         "General Email": set(),
     }
 
@@ -405,8 +416,9 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     specific_emails = (
         categorized["HR Email"] |
         categorized["Recruitment Email"] |
+        categorized["Careers Email"] |
         categorized["Manager Email"] |
-        categorized["Careers Email"]
+        categorized["Info Email"]
     )
     categorized["General Email"] = categorized["General Email"] - specific_emails
 
@@ -414,8 +426,9 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     result = {
         "HR Email": ", ".join(sorted(categorized["HR Email"])),
         "Recruitment Email": ", ".join(sorted(categorized["Recruitment Email"])),
-        "Manager Email": ", ".join(sorted(categorized["Manager Email"])),
         "Careers Email": ", ".join(sorted(categorized["Careers Email"])),
+        "Manager Email": ", ".join(sorted(categorized["Manager Email"])),
+        "Info Email": ", ".join(sorted(categorized["Info Email"])),
         "General Email": ", ".join(sorted(categorized["General Email"])),
     }
 
@@ -423,8 +436,8 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     logger.info(
         f"Overall Email Extraction Complete. Total unique valid emails: {total_found} | "
         f"HR: '{result['HR Email']}' | Recruitment: '{result['Recruitment Email']}' | "
-        f"Manager: '{result['Manager Email']}' | Careers: '{result['Careers Email']}' | "
-        f"General: '{result['General Email']}'"
+        f"Careers: '{result['Careers Email']}' | Manager: '{result['Manager Email']}' | "
+        f"Info: '{result['Info Email']}' | General: '{result['General Email']}'"
     )
 
     return result

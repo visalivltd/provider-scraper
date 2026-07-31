@@ -20,14 +20,15 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
     # Ensure parent directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define exact required 9 output columns for enriched file
+    # Define exact required 10 output columns for enriched file
     standard_columns = [
         config.REQUIRED_COLUMN,  # "Service Name"
         config.WEBSITE_COLUMN,   # "Service Website"
         "HR Email",
         "Recruitment Email",
-        "Manager Email",
         "Careers Email",
+        "Manager Email",
+        "Info Email",
         "General Email",
         "Status",
         "Failure Reason",
@@ -82,10 +83,10 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
         config.WEBSITE_COLUMN,   # "Service Website"
         "HR Email",
         "Recruitment Email",
-        "Manager Email",
         "Careers Email",
+        "Manager Email",
+        "Info Email",
         "General Email",
-        "Status",
     ]
     success_path = output_dir / "services_success.xlsx"
     success_df = out_df[success_mask][success_columns].copy()

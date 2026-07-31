@@ -59,8 +59,9 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
         "Service Website": "",
         "HR Email": "",
         "Recruitment Email": "",
-        "Manager Email": "",
         "Careers Email": "",
+        "Manager Email": "",
+        "Info Email": "",
         "General Email": "",
         "Status": "Failed",
         "Failure Reason": "",
@@ -98,8 +99,9 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                     record.update({
                         "HR Email": cached["HR Email"],
                         "Recruitment Email": cached["Recruitment Email"],
-                        "Manager Email": cached["Manager Email"],
                         "Careers Email": cached["Careers Email"],
+                        "Manager Email": cached["Manager Email"],
+                        "Info Email": cached["Info Email"],
                         "General Email": cached["General Email"],
                         "Status": cached["Status"],
                         "Failure Reason": cached["Failure Reason"],
@@ -118,13 +120,14 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                 email_results = extract_and_categorize_emails(pages_data)
                 record["HR Email"] = email_results.get("HR Email", "")
                 record["Recruitment Email"] = email_results.get("Recruitment Email", "")
-                record["Manager Email"] = email_results.get("Manager Email", "")
                 record["Careers Email"] = email_results.get("Careers Email", "")
+                record["Manager Email"] = email_results.get("Manager Email", "")
+                record["Info Email"] = email_results.get("Info Email", "")
                 record["General Email"] = email_results.get("General Email", "")
 
                 has_any_email = any(
                     record[k]
-                    for k in ["HR Email", "Recruitment Email", "Manager Email", "Careers Email", "General Email"]
+                    for k in ["HR Email", "Recruitment Email", "Careers Email", "Manager Email", "Info Email", "General Email"]
                 )
 
                 if has_any_email:
@@ -132,7 +135,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                     record["Failure Reason"] = ""
                 else:
                     record["Status"] = "Failed"
-                    record["Failure Reason"] = crawl_failure_reason if (crawl_failure_reason and crawl_failure_reason not in {"Website accessible but no email available", "No email found"}) else "Didn't find valid email"
+                    record["Failure Reason"] = crawl_failure_reason if (crawl_failure_reason and crawl_failure_reason not in {"Website accessible but no email available", "No email found"}) else "No email found"
 
                 logger.info(f"[{service_num}/{total_services}] Status: {record['Status']} | Reason: '{record['Failure Reason']}'")
 
@@ -174,8 +177,9 @@ def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_servi
             row_dict[config.WEBSITE_COLUMN] = rec.get("Service Website", "")
             row_dict["HR Email"] = rec.get("HR Email", "")
             row_dict["Recruitment Email"] = rec.get("Recruitment Email", "")
-            row_dict["Manager Email"] = rec.get("Manager Email", "")
             row_dict["Careers Email"] = rec.get("Careers Email", "")
+            row_dict["Manager Email"] = rec.get("Manager Email", "")
+            row_dict["Info Email"] = rec.get("Info Email", "")
             row_dict["General Email"] = rec.get("General Email", "")
             row_dict["Status"] = rec.get("Status", "Failed")
             row_dict["Failure Reason"] = rec.get("Failure Reason", "")
@@ -227,8 +231,9 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
                         "Service Website": "",
                         "HR Email": "",
                         "Recruitment Email": "",
-                        "Manager Email": "",
                         "Careers Email": "",
+                        "Manager Email": "",
+                        "Info Email": "",
                         "General Email": "",
                         "Status": "Failed",
                         "Failure Reason": str(exc),
@@ -257,8 +262,9 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df[config.WEBSITE_COLUMN] = [r["Service Website"] for r in ordered_results]
     df["HR Email"] = [r["HR Email"] for r in ordered_results]
     df["Recruitment Email"] = [r["Recruitment Email"] for r in ordered_results]
-    df["Manager Email"] = [r["Manager Email"] for r in ordered_results]
     df["Careers Email"] = [r["Careers Email"] for r in ordered_results]
+    df["Manager Email"] = [r["Manager Email"] for r in ordered_results]
+    df["Info Email"] = [r["Info Email"] for r in ordered_results]
     df["General Email"] = [r["General Email"] for r in ordered_results]
     df["Status"] = [r["Status"] for r in ordered_results]
     df["Failure Reason"] = [r["Failure Reason"] for r in ordered_results]

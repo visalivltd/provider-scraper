@@ -122,37 +122,19 @@ GENERAL_KEYWORDS = ["info", "office", "admin", "contact", "enquiries", "enquiry"
 IGNORE_KEYWORDS = [
     "referrals",
     "complaints",
-    "info",
     "supporter",
-    "enquiries",
-    "creditcontrol",
     "pricing",
     "campaigning",
     "media",
     "feedback",
     "customerservices",
-    "marketing",
-    "sales",
-    "finance",
-    "accounts",
-    "billing",
-    "support",
-    "privacy",
-    "gdpr",
-    "newsletter",
-    "unsubscribe",
-    "noreply",
-    "no-reply",
-    "example.com",
-    "domain.com",
-    "sentry.io",
-    "wix.com",
+    "creditcontrol",
 ]
 
 # Status Constants
 STATUS_SUCCESS = "Success"
 STATUS_WEBSITE_NOT_FOUND = "Website Not Found"
-STATUS_NO_EMAIL_FOUND = "Didn't find valid email"
+STATUS_NO_EMAIL_FOUND = "No email found"
 STATUS_FAILED = "Failed"
 
 
