@@ -9,7 +9,7 @@ import config
 from services.logger import logger
 from services.csv_reader import read_service_file
 from services.website_search import search_service_website
-from services.crawler import crawl_website, close_browser
+from services.crawler import crawl_website, close_browser, is_organization_service_page
 from services.email_extractor import extract_and_categorize_emails
 from services.csv_writer import save_enriched_excel
 from services.url_utils import normalize_website
@@ -112,7 +112,8 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                     return service_num, record
 
         # Crawling & Extraction
-        pages_data, crawl_failure_reason = crawl_website(website_url)
+        is_org_page = is_organization_service_page(website_url, service_name)
+        pages_data, crawl_failure_reason = crawl_website(website_url, service_name=service_name)
 
         if not pages_data:
             record["Status"] = "Failed"
@@ -120,7 +121,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
             logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Status: Failed ({record['Failure Reason']})")
         else:
             try:
-                email_results = extract_and_categorize_emails(pages_data)
+                email_results = extract_and_categorize_emails(pages_data, service_name=service_name, is_org_page=is_org_page)
                 record["HR Email"] = email_results.get("HR Email", "")
                 record["Recruitment Email"] = email_results.get("Recruitment Email", "")
                 record["Careers Email"] = email_results.get("Careers Email", "")

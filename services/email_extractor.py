@@ -291,17 +291,43 @@ def _categorize_email(email: str) -> str:
     return "General Email"
 
 
-def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str, str]:
+def extract_service_specific_emails(page_emails: Set[str], service_name: str) -> Set[str]:
+    """
+    Identifies emails specifically associated with the service from a set of extracted emails.
+    """
+    if not page_emails or not service_name:
+        return set()
+
+    norm_service = re.sub(r'[^\w\s]', '', service_name.lower())
+    core_words = [w for w in norm_service.split() if len(w) > 2 and w not in {"the", "and", "care", "home", "house", "ltd", "uk", "limited", "nursing", "residential", "service"}]
+    compact_service = "".join(core_words)
+
+    specific_emails = set()
+    for email in page_emails:
+        username = email.lower().split("@")[0]
+        clean_user = re.sub(r'[^\w]', '', username)
+
+        if core_words and any(w in clean_user for w in core_words):
+            specific_emails.add(email)
+            continue
+
+        if compact_service and (compact_service in clean_user or clean_user in compact_service):
+            specific_emails.add(email)
+            continue
+
+    return specific_emails
+
+
+def extract_and_categorize_emails(pages_data: List[Dict[str, str]], service_name: str = "", is_org_page: bool = False) -> Dict[str, str]:
     """
     Email Extraction & Categorization Strategy:
     1. Parse HTML, clean non-visible tags, scripts, styles, comments, and hidden elements.
     2. Extract emails from: mailto links, priority contact/header/footer sections, full visible text, and raw HTML source.
     3. Normalize obfuscated email formats into standard email addresses.
-    4. Filter out emails matching blocked/ignored local part keywords (info, enquiries, complaints, referrals, etc.) while preserving valid role emails (hr, recruitment, manager, careers, etc.).
-    5. Log detailed per-page extraction results (URL, HTTP Status, emails found, emails ignored, reasons).
-    6. Prioritize Service Website domain emails (@examplecare.co.uk) over all other domains.
-    7. Categorize valid emails into HR Email, Recruitment Email, Manager Email, Careers Email, and General Email.
-    8. Perform cross-category and intra-category deduplication.
+    4. Filter out emails matching blocked/ignored local part keywords while preserving valid role emails.
+    5. For Case 2 (Org Service Pages), prioritize service-specific emails over generic group emails.
+    6. Categorize valid emails into HR Email, Recruitment Email, Careers Email, Manager Email, Info Email, and General Email.
+    7. Perform cross-category and intra-category deduplication.
     """
     all_page_candidates: List[Tuple[str, str]] = []  # List of (email, page_url)
     service_domains: Set[str] = set()
@@ -380,6 +406,16 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     # Collect valid unique emails across all crawled pages
     valid_candidates: Set[str] = {e for e, _ in all_page_candidates}
 
+    # Case 2 check: if processing an organization service page, check for service-specific emails
+    if is_org_page and service_name:
+        specific = extract_service_specific_emails(valid_candidates, service_name)
+        if specific:
+            logger.info(
+                f"Case 2 Filter applied for '{service_name}': Retaining service-specific email(s) {list(specific)} "
+                f"and excluding generic organization emails."
+            )
+            valid_candidates = specific
+
     # Service-domain priority: if emails belonging to Service Website domain exist, keep ONLY those
     service_emails = {
         e for e in valid_candidates
@@ -441,3 +477,4 @@ def extract_and_categorize_emails(pages_data: List[Dict[str, str]]) -> Dict[str,
     )
 
     return result
+

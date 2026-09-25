@@ -220,16 +220,50 @@ def _get_root_domain(host_or_domain: str) -> str:
     return ".".join(parts[-2:])
 
 
-def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
+import re
+
+
+def is_organization_service_page(url: str, service_name: str = "") -> bool:
+    """
+    Determines if a selected URL is an Organization / Group / Provider service-specific page (Case 2)
+    or a Standalone Direct Website (Case 1).
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        path = parsed.path.lower().strip("/")
+        netloc = parsed.netloc.lower().replace("www.", "")
+
+        org_path_keywords = [
+            "location", "locations", "homes", "our-homes", "our-care-homes",
+            "care-home", "care-homes", "find-residential-care-homes",
+            "services", "service", "site", "branch", "properties", "property",
+            "detail"
+        ]
+
+        for kw in org_path_keywords:
+            if f"/{kw}/" in f"/{path}/" or path.startswith(f"{kw}/"):
+                return True
+
+        if path and service_name:
+            norm_service = re.sub(r'[^\w\s]', '', service_name.lower())
+            words = [w for w in norm_service.split() if len(w) > 2 and w not in {"the", "and", "care", "home", "house", "ltd", "uk", "limited"}]
+            if words and not any(w in netloc for w in words):
+                return True
+
+        return False
+    except Exception:
+        return False
+
+
+def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str, str]], str]:
     """
     Optimized Smart Web Crawler using Playwright:
     1. Reuses shared Chromium browser instance (creates per-service context/page).
-    2. Blocks images, media, fonts, stylesheets, and tracking scripts via request routing without blocking documents.
-    3. Handles client-side redirects and non-200 HTTP statuses safely if DOM is loaded.
-    4. Probes homepage discovered links AND automatic common paths.
-    5. Retries transient homepage errors ONCE using a fresh browser context.
-    6. Early Exit: Stops crawling immediately if all 5 email categories are satisfied.
-    7. Returns (pages_data, failure_reason).
+    2. Handles CASE 1 (Direct Service Website) vs CASE 2 (Organization / Group Service Page).
+    3. For CASE 2: Inspects target page first for service-specific emails before falling back to full crawling.
+    4. For CASE 1: Uses full existing crawling strategy across relevant candidate pages.
     """
     if not base_url:
         logger.debug("[DEBUG] Base URL empty. Crawl stopped.")
@@ -248,7 +282,7 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
     actual_visited_urls: List[str] = []
 
     logger.info(f"Starting optimized crawler for base URL: {target_base}")
-    logger.debug(f"[DEBUG] Homepage visited: {target_base}")
+    logger.debug(f"[DEBUG] Target page visited: {target_base}")
 
     try:
         browser = get_browser()
@@ -259,19 +293,19 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
         page = context.new_page()
 
         try:
-            # Step 1: Open Homepage
+            # Step 1: Open Target Page
             resp, err_reason = _goto_safe(page, target_base, config.PAGE_TIMEOUT_MS)
             actual_visited_urls.append(target_base)
 
             homepage_html = _get_content_safe(page)
             status_code = resp.status if resp is not None else (200 if homepage_html else None)
-            logger.debug(f"[DEBUG] Homepage HTTP status: {status_code}")
+            logger.debug(f"[DEBUG] Target page HTTP status: {status_code}")
             logger.debug(f"[DEBUG] DOM extracted or not: {bool(homepage_html)} (Length: {len(homepage_html)})")
 
-            # Retry logic: If homepage failed to produce DOM or returned navigation error, retry ONCE with fresh context
+            # Retry logic: If target page failed to produce DOM or returned navigation error, retry ONCE with fresh context
             if not homepage_html or bool(err_reason):
                 logger.info(
-                    f"Homepage load initial attempt returned status {status_code} / error '{err_reason}'. "
+                    f"Target page load initial attempt returned status {status_code} / error '{err_reason}'. "
                     f"Retrying once with a fresh Playwright browser context..."
                 )
                 try:
@@ -293,15 +327,15 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
                     err_reason = err_reason_retry
                     homepage_html = retry_html
                     status_code = resp_retry.status if resp_retry is not None else status_code
-                    logger.debug(f"[DEBUG] Retry Homepage HTTP status: {status_code}, DOM extracted: {bool(homepage_html)}")
+                    logger.debug(f"[DEBUG] Retry Target page HTTP status: {status_code}, DOM extracted: {bool(homepage_html)}")
 
-            # If homepage DOM cannot be loaded at all after retry -> Real DNS / connection failure
+            # If target page DOM cannot be loaded at all after retry -> Real DNS / connection failure
             if not homepage_html:
-                logger.error(f"Failed to load homepage DOM for {target_base}: {err_reason}")
-                logger.debug(f"[DEBUG] Exact reason crawl stopped: Homepage DOM could not be extracted ({err_reason})")
+                logger.error(f"Failed to load target page DOM for {target_base}: {err_reason}")
+                logger.debug(f"[DEBUG] Exact reason crawl stopped: Target page DOM could not be extracted ({err_reason})")
                 return [], err_reason if err_reason else "Website not reachable"
 
-            # Homepage DOM loaded successfully -> Extract content & search emails
+            # Target page DOM loaded successfully -> Extract content & search emails
             final_url = page.url
             visited_canonical.add(_canonical(final_url))
             visited_canonical.add(_canonical(target_base))
@@ -309,17 +343,32 @@ def crawl_website(base_url: str) -> Tuple[List[Dict[str, str]], str]:
             recorded_status = status_code if status_code is not None else 200
             page_statuses.append(recorded_status)
             pages_data.append({"url": final_url, "html": homepage_html, "status": recorded_status})
-            logger.info(f"Page URL: {final_url} | HTTP Status: {recorded_status} | Successfully loaded homepage DOM.")
+            logger.info(f"Page URL: {final_url} | HTTP Status: {recorded_status} | Successfully loaded target page DOM.")
 
-            # Log homepage emails
+            # CASE 2 Check: Organization / Group / Provider Service Page
+            is_org_page = is_organization_service_page(target_base, service_name)
+            if is_org_page:
+                logger.info(f"CASE 2 Detected: '{target_base}' is an Organization/Group Service Page for '{service_name}'. Inspecting target page first.")
+                page1_emails_dict = extract_and_categorize_emails(pages_data, service_name=service_name, is_org_page=True)
+                has_any_page1_email = any(bool(v.strip()) for v in page1_emails_dict.values())
+
+                if has_any_page1_email:
+                    logger.info(f"CASE 2: Found service-specific email(s) on target page for '{service_name}': {page1_emails_dict}. Skipping organization-wide crawling.")
+                    return pages_data, ""
+                else:
+                    logger.info(f"CASE 2: No service-specific email found on target page for '{service_name}'. Falling back to existing crawling strategy.")
+            else:
+                logger.info(f"CASE 1 Detected: '{target_base}' is a Direct Standalone Service Website. Using existing full crawling strategy.")
+
+            # Log target page emails
             homepage_emails_dict = extract_and_categorize_emails([{"url": final_url, "html": homepage_html, "status": recorded_status}])
             logger.debug(f"[DEBUG] Emails found on page ({final_url}): {homepage_emails_dict}")
 
-            # Early Exit Check after homepage
+            # Early Exit Check after target page
             current_emails = extract_and_categorize_emails(pages_data)
             if is_all_categories_found(current_emails):
-                logger.info(f"Early exit triggered on homepage for {target_base}: All 5 email categories populated.")
-                logger.debug(f"[DEBUG] Exact reason crawl stopped: Early exit on homepage (all 5 categories found)")
+                logger.info(f"Early exit triggered on target page for {target_base}: All 5 email categories populated.")
+                logger.debug(f"[DEBUG] Exact reason crawl stopped: Early exit on target page (all 5 categories found)")
                 return pages_data, ""
 
             # Step 2: Smart Link Discovery
