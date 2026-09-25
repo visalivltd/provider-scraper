@@ -5,3 +5,8 @@ __pycache__/
 logs/
 outputs/
 .vscode/
+# Test outputs
+test_outputs/
+
+# Test uploads
+uploads/test_*.xlsx

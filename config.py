@@ -11,6 +11,7 @@ DEFAULT_OUTPUT_FILE = OUTPUT_DIR / "services_enriched.xlsx"
 
 # Ingestion Settings
 REQUIRED_COLUMN = "Service Name"
+DUPLICATE_COLUMN = "Duplicate"
 WEBSITE_COLUMN = "Service Website"
 POSTCODE_COLUMN = "Postcode"
 TOWN_COLUMN = "Town"
@@ -21,25 +22,17 @@ CSV_ENCODINGS = ["utf-8", "utf-8-sig", "latin-1"]
 SERVICE_NAME_ALIASES = [
     "service name",
     "servicename",
-    "service",
-    "provider name",
-    "providername",
-    "provider",
-    "company",
-    "company name",
-    "organisation",
-    "organization",
+    "Service name",
+    "Service Name",
 ]
 
 WEBSITE_ALIASES = [
     "service website",
     "servicewebsite",
     "service_website",
-    "provider website",
-    "website",
-    "company website",
-    "organisation website",
-    "organization website",
+    "Service Website",
+    "Servicewebsite",
+    "Service_website",
 ]
 
 POSTCODE_ALIASES = [
@@ -116,8 +109,8 @@ IRRELEVANT_PATH_KEYWORDS = [
 # Email Extraction Keywords
 HR_KEYWORDS = ["hr", "humanresources", "human resources", "people", "talent"]
 RECRUITMENT_KEYWORDS = ["recruitment", "recruiter", "recruiting"]
-CAREERS_KEYWORDS = ["jobs", "career", "careers", "vacancy", "vacancies", "join", "workwithus"]
-GENERAL_KEYWORDS = ["info", "office", "admin", "contact", "enquiries", "enquiry", "hello", "helpdesk"]
+CAREERS_KEYWORDS = ["jobs", "career", "careers", "vacancy", "vacancies", "join"]
+GENERAL_KEYWORDS = ["info", "office", "admin"]
 
 IGNORE_KEYWORDS = [
     "referrals",
@@ -136,6 +129,9 @@ STATUS_SUCCESS = "Success"
 STATUS_WEBSITE_NOT_FOUND = "Website Not Found"
 STATUS_NO_EMAIL_FOUND = "No email found"
 STATUS_FAILED = "Failed"
+
+
+
 
 
 def normalize_column_name(name: str) -> str:

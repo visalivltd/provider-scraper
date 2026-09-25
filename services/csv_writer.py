@@ -9,10 +9,11 @@ from services.logger import logger
 
 def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = config.DEFAULT_OUTPUT_FILE) -> Path:
     """
-    Saves the enriched service DataFrame as 3 Excel files in the outputs/ directory:
-    1. services_enriched.xlsx (all 9 columns, all rows)
-    2. services_success.xlsx (8 columns, rows with Status == "Success")
-    3. services_failed.xlsx (4 columns, rows with Status == "Failed")
+    Saves the enriched service DataFrame as 4 Excel files in the outputs/ directory:
+    1. services_enriched.xlsx (11 columns, all rows including duplicates)
+    2. services_success.xlsx (9 columns, genuinely scraped successful rows only)
+    3. services_failed.xlsx (5 columns, genuinely scraped failed rows only)
+    4. services_duplicates.xlsx (3 columns, duplicate rows only)
     """
     output_path = Path(output_path_input)
     output_dir = output_path.parent
@@ -20,10 +21,11 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
     # Ensure parent directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define exact required 10 output columns for enriched file
+    # Define exact required 11 output columns for enriched file
     standard_columns = [
-        config.REQUIRED_COLUMN,  # "Service Name"
-        config.WEBSITE_COLUMN,   # "Service Website"
+        config.REQUIRED_COLUMN,   # "Service Name"
+        config.DUPLICATE_COLUMN,  # "Duplicate"
+        config.WEBSITE_COLUMN,    # "Service Website"
         "HR Email",
         "Recruitment Email",
         "Careers Email",
@@ -42,7 +44,14 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
     # Keep standard columns for services_enriched.xlsx
     out_df = df[standard_columns].copy()
 
-    # Normalize status column for case-insensitive / whitespace-tolerant filtering
+    # Normalize columns for filtering
+    dup_normalized = (
+        out_df[config.DUPLICATE_COLUMN]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
     status_normalized = (
         out_df["Status"]
         .fillna("")
@@ -52,20 +61,24 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
     )
 
     total_rows = len(out_df)
-    success_mask = status_normalized == "success"
-    failed_mask = status_normalized == "failed"
+    duplicate_mask = dup_normalized == "duplicate"
+    success_mask = (status_normalized == "success") & (~duplicate_mask)
+    failed_mask = (status_normalized == "failed") & (~duplicate_mask)
 
     success_rows = int(success_mask.sum())
     failed_rows = int(failed_mask.sum())
+    duplicate_rows = int(duplicate_mask.sum())
 
     # Print required debug logs before writing Excel files
     print(f"\nTotal rows: {total_rows}")
     print(f"Success rows: {success_rows}")
     print(f"Failed rows: {failed_rows}")
+    print(f"Duplicate rows: {duplicate_rows}")
 
     logger.info(f"Total rows: {total_rows}")
     logger.info(f"Success rows: {success_rows}")
     logger.info(f"Failed rows: {failed_rows}")
+    logger.info(f"Duplicate rows: {duplicate_rows}")
 
     # 1. Save services_enriched.xlsx
     try:
@@ -79,8 +92,9 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
 
     # 2. Save services_success.xlsx
     success_columns = [
-        config.REQUIRED_COLUMN,  # "Service Name"
-        config.WEBSITE_COLUMN,   # "Service Website"
+        config.REQUIRED_COLUMN,   # "Service Name"
+        config.DUPLICATE_COLUMN,  # "Duplicate"
+        config.WEBSITE_COLUMN,    # "Service Website"
         "HR Email",
         "Recruitment Email",
         "Careers Email",
@@ -101,8 +115,9 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
 
     # 3. Save services_failed.xlsx
     failed_columns = [
-        config.REQUIRED_COLUMN,  # "Service Name"
-        config.WEBSITE_COLUMN,   # "Service Website"
+        config.REQUIRED_COLUMN,   # "Service Name"
+        config.DUPLICATE_COLUMN,  # "Duplicate"
+        config.WEBSITE_COLUMN,    # "Service Website"
         "Status",
         "Failure Reason",
     ]
@@ -114,6 +129,23 @@ def save_enriched_excel(df: pd.DataFrame, output_path_input: Union[str, Path] = 
         print(f"Failed dataset successfully saved to: {failed_path}")
     except Exception as exc:
         error_msg = f"Failed to save failed Excel file '{failed_path}': {exc}"
+        logger.error(error_msg)
+        raise IOError(error_msg) from exc
+
+    # 4. Save services_duplicates.xlsx
+    duplicates_columns = [
+        config.REQUIRED_COLUMN,   # "Service Name"
+        config.DUPLICATE_COLUMN,  # "Duplicate"
+        config.WEBSITE_COLUMN,    # "Service Website"
+    ]
+    duplicates_path = output_dir / "services_duplicates.xlsx"
+    duplicates_df = out_df[duplicate_mask][duplicates_columns].copy()
+    try:
+        duplicates_df.to_excel(duplicates_path, index=False, engine="openpyxl")
+        logger.info(f"Successfully saved duplicates dataset with {len(duplicates_df)} rows to Excel file: {duplicates_path}")
+        print(f"Duplicates dataset successfully saved to: {duplicates_path}")
+    except Exception as exc:
+        error_msg = f"Failed to save duplicates Excel file '{duplicates_path}': {exc}"
         logger.error(error_msg)
         raise IOError(error_msg) from exc
 

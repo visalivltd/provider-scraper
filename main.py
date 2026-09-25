@@ -12,6 +12,7 @@ from services.website_search import search_service_website
 from services.crawler import crawl_website, close_browser
 from services.email_extractor import extract_and_categorize_emails
 from services.csv_writer import save_enriched_excel
+from services.url_utils import normalize_website
 
 # Thread-safe in-memory domain cache to avoid re-crawling duplicate domains
 domain_cache: Dict[str, Dict[str, str]] = {}
@@ -48,14 +49,16 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
 
     service_name = str(row[config.REQUIRED_COLUMN]).strip()
     postcode = str(row[config.POSTCODE_COLUMN]).strip() if has_postcode_col and pd.notna(row[config.POSTCODE_COLUMN]) else None
-    if postcode and postcode.lower() == "nan":
-        postcode = None
+    town = str(row[config.TOWN_COLUMN]).strip() if has_town_col and pd.notna(row[config.TOWN_COLUMN]) else None
+    if town and town.lower() == "nan":
+        town = None
 
     service_web = str(row[config.WEBSITE_COLUMN]).strip() if has_web_col and pd.notna(row[config.WEBSITE_COLUMN]) else ""
     if service_web.lower() == "nan":
         service_web = ""
 
     record = {
+        config.DUPLICATE_COLUMN: "",
         "Service Website": "",
         "HR Email": "",
         "Recruitment Email": "",
@@ -67,7 +70,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
         "Failure Reason": "",
     }
 
-    logger.info(f"[{service_num}/{total_services}] Processing service: '{service_name}' (Postcode: '{postcode or 'N/A'}')")
+    logger.info(f"[{service_num}/{total_services}] Processing service: '{service_name}' (Postcode: '{postcode or 'N/A'}', Town: '{town or 'N/A'}')")
 
     website_url = ""
     website_source = ""
@@ -78,7 +81,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
             website_source = "Service Website"
         else:
             website_source = "Google Search"
-            found = search_service_website(service_name=service_name, postcode=postcode)
+            found = search_service_website(service_name=service_name, postcode=postcode, town=town)
             website_url = found or ""
 
         if not website_url:
@@ -160,7 +163,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
 
 def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_services: int, is_final: bool = False) -> None:
     """
-    Saves current in-memory results snapshot to disk (all 3 Excel files).
+    Saves current in-memory results snapshot to disk (all 4 Excel files).
     ThreadPoolExecutor safe: called ONLY from the main thread.
     """
     if not results_map:
@@ -174,6 +177,7 @@ def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_servi
         for idx in sorted_indices:
             row_dict = df.iloc[idx - 1].to_dict()
             rec = results_map[idx]
+            row_dict[config.DUPLICATE_COLUMN] = rec.get(config.DUPLICATE_COLUMN, "")
             row_dict[config.WEBSITE_COLUMN] = rec.get("Service Website", "")
             row_dict["HR Email"] = rec.get("HR Email", "")
             row_dict["Recruitment Email"] = rec.get("Recruitment Email", "")
@@ -181,7 +185,7 @@ def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_servi
             row_dict["Manager Email"] = rec.get("Manager Email", "")
             row_dict["Info Email"] = rec.get("Info Email", "")
             row_dict["General Email"] = rec.get("General Email", "")
-            row_dict["Status"] = rec.get("Status", "Failed")
+            row_dict["Status"] = rec.get("Status", "")
             row_dict["Failure Reason"] = rec.get("Failure Reason", "")
             rows.append(row_dict)
 
@@ -198,6 +202,7 @@ def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_servi
 def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """
     Parallel processing of the service dataset using ThreadPoolExecutor.
+    Performs pre-crawling duplicate website detection.
     Maintains 100% row order matching the input DataFrame.
     Automatically saves checkpoints every 30 processed services and upon interrupt/exception.
     """
@@ -208,41 +213,69 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     has_postcode_col = config.POSTCODE_COLUMN in df.columns
     has_town_col = config.TOWN_COLUMN in df.columns
 
-    tasks = [
-        (service_num, total_services, row.to_dict(), has_web_col, has_postcode_col, has_town_col)
-        for service_num, (_, row) in enumerate(df.iterrows(), start=1)
-    ]
-
     results_map: Dict[int, dict] = {}
+    seen_websites = set()
+    tasks = []
+
+    # 1. Pre-crawling duplicate detection on input rows
+    for service_num, (_, row) in enumerate(df.iterrows(), start=1):
+        service_web = str(row[config.WEBSITE_COLUMN]).strip() if has_web_col and pd.notna(row[config.WEBSITE_COLUMN]) else ""
+        if service_web.lower() == "nan":
+            service_web = ""
+
+        norm_url = normalize_website(service_web) if service_web else ""
+
+        if norm_url and norm_url in seen_websites:
+            # Duplicate website detected
+            logger.info(f"[{service_num}/{total_services}] Duplicate website detected for service '{row.get(config.REQUIRED_COLUMN, '')}': '{service_web}'. Skipping crawl task.")
+            results_map[service_num] = {
+                config.DUPLICATE_COLUMN: "Duplicate",
+                "Service Website": service_web,
+                "HR Email": "",
+                "Recruitment Email": "",
+                "Careers Email": "",
+                "Manager Email": "",
+                "Info Email": "",
+                "General Email": "",
+                "Status": "",
+                "Failure Reason": "",
+            }
+        else:
+            if norm_url:
+                seen_websites.add(norm_url)
+            tasks.append((service_num, total_services, row.to_dict(), has_web_col, has_postcode_col, has_town_col))
+
     last_saved_count = 0
     checkpoint_interval = getattr(config, "CHECKPOINT_INTERVAL", 30)
 
     try:
-        with ThreadPoolExecutor(max_workers=config.NUM_WORKERS) as executor:
-            futures = {executor.submit(process_single_service, task): task[0] for task in tasks}
-            for future in as_completed(futures):
-                service_num = futures[future]
-                try:
-                    idx, record = future.result()
-                    results_map[idx] = record
-                except Exception as exc:
-                    logger.error(f"Worker thread for service #{service_num} raised an unhandled exception: {exc}")
-                    results_map[service_num] = {
-                        "Service Website": "",
-                        "HR Email": "",
-                        "Recruitment Email": "",
-                        "Careers Email": "",
-                        "Manager Email": "",
-                        "Info Email": "",
-                        "General Email": "",
-                        "Status": "Failed",
-                        "Failure Reason": str(exc),
-                    }
+        if tasks:
+            with ThreadPoolExecutor(max_workers=config.NUM_WORKERS) as executor:
+                futures = {executor.submit(process_single_service, task): task[0] for task in tasks}
+                for future in as_completed(futures):
+                    service_num = futures[future]
+                    try:
+                        idx, record = future.result()
+                        results_map[idx] = record
+                    except Exception as exc:
+                        logger.error(f"Worker thread for service #{service_num} raised an unhandled exception: {exc}")
+                        results_map[service_num] = {
+                            config.DUPLICATE_COLUMN: "",
+                            "Service Website": "",
+                            "HR Email": "",
+                            "Recruitment Email": "",
+                            "Careers Email": "",
+                            "Manager Email": "",
+                            "Info Email": "",
+                            "General Email": "",
+                            "Status": "Failed",
+                            "Failure Reason": str(exc),
+                        }
 
-                completed_count = len(results_map)
-                if completed_count % checkpoint_interval == 0 and completed_count > last_saved_count and completed_count < total_services:
-                    _save_checkpoint(df, results_map, total_services, is_final=False)
-                    last_saved_count = completed_count
+                    completed_count = len(results_map)
+                    if completed_count % checkpoint_interval == 0 and completed_count > last_saved_count and completed_count < total_services:
+                        _save_checkpoint(df, results_map, total_services, is_final=False)
+                        last_saved_count = completed_count
 
     except KeyboardInterrupt:
         logger.warning(f"Execution interrupted by user (KeyboardInterrupt). Saving checkpoint for {len(results_map)} processed rows...")
@@ -259,6 +292,7 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     # Ensure 100% order preservation matching input DataFrame
     ordered_results = [results_map[i] for i in range(1, total_services + 1)]
 
+    df[config.DUPLICATE_COLUMN] = [r.get(config.DUPLICATE_COLUMN, "") for r in ordered_results]
     df[config.WEBSITE_COLUMN] = [r["Service Website"] for r in ordered_results]
     df["HR Email"] = [r["HR Email"] for r in ordered_results]
     df["Recruitment Email"] = [r["Recruitment Email"] for r in ordered_results]
