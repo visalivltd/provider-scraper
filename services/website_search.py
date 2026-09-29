@@ -50,7 +50,7 @@ def normalize_text(text: str) -> str:
 # Comprehensive list of Third-Party / Regulator / Aggregator / Directory / Review / Social Domains
 THIRD_PARTY_INDICATORS = [
     # Care Home Directories & Aggregators
-    "carehome.co.uk", "carefind.com", "elder.org", "lottie.org", "autumna.co.uk",
+    "carehome.co.uk", "carefind.com", "carefind.co.uk", "elder.org", "lottie.org", "autumna.co.uk",
     "carechoices.co.uk", "liveincaredirect.org", "findyourroom.co.uk",
     "yourcarehome.co.uk", "carehomeos.co.uk", "caresourcer.com",
     "arrangingafuneral.co.uk", "economicsbydesign.com", "dudleyci.co.uk",
@@ -59,6 +59,7 @@ THIRD_PARTY_INDICATORS = [
     # Regulators, NHS & Govt Directories
     "cqc.org.uk", "nhs.uk", "nhs.net", "careinspectorate", "ciw.wales", "rqia.org.uk",
     "ofsted.gov.uk", "food.gov.uk", "companieshouse.gov.uk", "company-information.service.gov.uk",
+    "gov.uk", "gov.scot", "gov.wales",
 
     # General Business Directories, Property, Accommodation & Real Estate
     "zoopla.co.uk", "rightmove.co.uk", "onthemarket.com", "yell.com",
@@ -81,7 +82,7 @@ def classify_result_type(url: str, title: str = "") -> str:
     """
     Classifies search result into:
     - 'Direct Service Website' (Official provider site)
-    - 'Third-Party / Regulator / Aggregator Page' (CQC, Carehome.co.uk, NHS, Gov directories, etc.)
+    - 'Third-Party / Regulator / Aggregator Page' (CQC, Carehome.co.uk, NHS, Gov directories, Council pages, etc.)
     """
     if not url:
         return "Third-Party / Regulator / Aggregator Page"
@@ -90,9 +91,22 @@ def classify_result_type(url: str, title: str = "") -> str:
         parsed = urlparse(url if "://" in url else f"http://{url}")
         netloc = parsed.netloc.lower().split(":")[0].strip(".")
 
+        if (
+            netloc.endswith(".gov.uk")
+            or netloc.endswith(".gov")
+            or ".gov." in netloc
+            or netloc.endswith(".nhs.uk")
+            or "council" in netloc
+        ):
+            return "Third-Party / Regulator / Aggregator Page"
+
         for indicator in THIRD_PARTY_INDICATORS:
-            if indicator in netloc:
-                return "Third-Party / Regulator / Aggregator Page"
+            if "." in indicator:
+                if netloc == indicator or netloc.endswith("." + indicator):
+                    return "Third-Party / Regulator / Aggregator Page"
+            else:
+                if indicator in netloc:
+                    return "Third-Party / Regulator / Aggregator Page"
 
         return "Direct Service Website"
     except Exception:
@@ -118,7 +132,7 @@ def get_root_url_if_homepage(url: str) -> str:
 
 def evaluate_organic_result(result: dict, service_name: str, postcode: Optional[str] = None, town: Optional[str] = None) -> dict:
     """
-    Evaluates an organic search result item for Service Name match, Postcode match, and Direct Page Type.
+    Evaluates an organic search result item for Service Name match, Postcode match, Domain match, and Direct Page Type.
     """
     link = result.get("link", "")
     title = result.get("title", "")
@@ -134,10 +148,10 @@ def evaluate_organic_result(result: dict, service_name: str, postcode: Optional[
     # Service Name Match
     service_match = norm_service in combined_text
     if not service_match:
-        service_words = [w for w in norm_service.split() if len(w) > 2 and w not in {"the", "and", "care", "home", "house", "ltd", "uk", "limited"}]
+        service_words = [w for w in norm_service.split() if len(w) > 2 and w not in {"the", "and", "care", "home", "house", "ltd", "uk", "limited", "residential", "nursing", "services", "service"}]
         if service_words:
             matched_words = [w for w in service_words if w in combined_text]
-            service_match = len(matched_words) >= max(1, int(len(service_words) * 0.6))
+            service_match = len(matched_words) >= max(1, int(len(service_words) * 0.5))
 
     # Postcode Match
     postcode_match = False
@@ -156,16 +170,29 @@ def evaluate_organic_result(result: dict, service_name: str, postcode: Optional[
     page_type = classify_result_type(link, title)
     is_direct_site = (page_type == "Direct Service Website")
 
-    # Domain Match check (e.g. whitegablescarehome.co.uk matching White Gables Care Home)
+    # Domain Match check (e.g. greenfieldview.co.uk matching Greenfield View Care Home)
     domain_match = False
-    try:
-        netloc = urlparse(link if "://" in link else f"http://{link}").netloc.lower()
-        clean_netloc = netloc.replace("www.", "").replace(".", "")
-        clean_service_compact = norm_service.replace(" ", "")
-        if clean_service_compact in clean_netloc or clean_netloc in clean_service_compact:
-            domain_match = True
-    except Exception:
-        pass
+    if link:
+        try:
+            netloc = urlparse(link if "://" in link else f"http://{link}").netloc.lower()
+            clean_netloc = netloc.replace("www.", "")
+            domain_body = clean_netloc.split(".")[0]
+
+            stop_words = {"the", "and", "care", "home", "house", "ltd", "uk", "limited", "residential", "nursing", "services", "service"}
+            core_words = [w for w in norm_service.split() if len(w) > 2 and w not in stop_words]
+            if not core_words:
+                core_words = [w for w in norm_service.split() if len(w) > 2]
+
+            compact_service = "".join(core_words)
+
+            if compact_service and (compact_service in domain_body or domain_body in compact_service):
+                domain_match = True
+            elif len(core_words) >= 2 and all(w in domain_body for w in core_words):
+                domain_match = True
+            elif len(core_words) == 1 and core_words[0] in domain_body:
+                domain_match = True
+        except Exception:
+            pass
 
     return {
         "url": link,
@@ -179,6 +206,53 @@ def evaluate_organic_result(result: dict, service_name: str, postcode: Optional[
         "page_type": page_type,
         "raw_result": result
     }
+
+
+def _score_direct_candidate(c: dict) -> float:
+    score = 0.0
+    if c.get("domain_match"):
+        score += 50.0
+    if c.get("service_match"):
+        score += 30.0
+    if c.get("postcode_match"):
+        score += 20.0
+    if c.get("town_match"):
+        score += 10.0
+
+    url = c.get("url", "")
+    try:
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        path = parsed.path.strip("/")
+        if not path or path.lower() in {"index.html", "home", "default.aspx"}:
+            score += 15.0
+    except Exception:
+        pass
+
+    rank = c.get("rank", 1)
+    score += max(0, 10 - rank)
+    return score
+
+
+def _score_fallback_candidate(c: dict) -> float:
+    score = 0.0
+    url = c.get("url", "").lower()
+
+    if "carehome.co.uk" in url:
+        score += 40.0
+
+    if c.get("service_match"):
+        score += 30.0
+    if c.get("postcode_match"):
+        score += 20.0
+    if c.get("town_match"):
+        score += 10.0
+
+    if any(k in url for k in ["cqc.org.uk", "gov.uk", "nhs.uk", "elder.org"]):
+        score -= 15.0
+
+    rank = c.get("rank", 1)
+    score += max(0, 10 - rank)
+    return score
 
 
 def _call_serper_api(query: str, max_retries: int = 2) -> List[dict]:
@@ -243,7 +317,6 @@ def search_service_website(
 
     clean_town = town.strip() if town and isinstance(town, str) and town.strip() and town.strip().lower() != "nan" else None
 
-    # Construct search queries to execute in order
     queries_to_try = []
     if clean_postcode:
         queries_to_try.append(f'"{clean_service_name}" "{clean_postcode}"')
@@ -268,28 +341,20 @@ def search_service_website(
             eval_data["rank"] = rank
             candidates.append(eval_data)
 
-        # Look for direct service website candidates that match the service name
-        direct_candidates = [c for c in candidates if c["is_direct"] and c["service_match"]]
+        evaluated_candidates = candidates
+        selected_query = q
+
+        direct_candidates = [c for c in candidates if c["is_direct"] and (c["service_match"] or c["domain_match"])]
 
         if direct_candidates:
-            # Prefer candidates that match Postcode OR Town OR Domain Name
-            loc_directs = [c for c in direct_candidates if c["postcode_match"] or c["town_match"] or c["domain_match"]]
-            if loc_directs:
-                chosen_candidate = min(loc_directs, key=lambda x: x["rank"])
-                selected_query = q
-                evaluated_candidates = candidates
-                break
-            elif not clean_postcode and not clean_town:
-                chosen_candidate = min(direct_candidates, key=lambda x: x["rank"])
-                selected_query = q
-                evaluated_candidates = candidates
-                break
+            chosen_candidate = max(direct_candidates, key=lambda x: (_score_direct_candidate(x), -x["rank"]))
+        else:
+            chosen_candidate = max(candidates, key=lambda x: (_score_fallback_candidate(x), -x["rank"]))
 
-        if not evaluated_candidates:
-            evaluated_candidates = candidates
-            selected_query = q
+        break
 
-    if not organic_results and not evaluated_candidates:
+
+    if not evaluated_candidates:
         logger.warning(f"No organic search results returned for '{clean_service_name}'.")
         print("\n==================================================")
         print(f"SEARCH QUERY: {clean_service_name}")
@@ -297,14 +362,6 @@ def search_service_website(
         print("SELECTION REASON: No search results returned")
         print("==================================================\n")
         return None
-
-    # Fallback selection if no direct candidate was found across queries
-    if not chosen_candidate and evaluated_candidates:
-        matched = [c for c in evaluated_candidates if c["service_match"]]
-        if matched:
-            chosen_candidate = min(matched, key=lambda x: (0 if (x["postcode_match"] or x["town_match"]) else 1, x["rank"]))
-        else:
-            chosen_candidate = evaluated_candidates[0]
 
     selected_url = chosen_candidate["url"] if chosen_candidate else None
     selected_title = chosen_candidate["title"] if chosen_candidate else ""
@@ -314,7 +371,6 @@ def search_service_website(
     if selected_url and chosen_candidate and chosen_candidate["is_direct"]:
         selected_url = get_root_url_if_homepage(selected_url)
 
-    # Print required detailed debug output for every candidate
     log_lines = [
         "\n==================================================",
         f"SEARCH QUERY: {selected_query}",

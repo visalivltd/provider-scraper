@@ -257,17 +257,18 @@ def is_organization_service_page(url: str, service_name: str = "") -> bool:
         return False
 
 
-def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str, str]], str]:
+def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str, str]], str, bool]:
     """
     Optimized Smart Web Crawler using Playwright:
     1. Reuses shared Chromium browser instance (creates per-service context/page).
     2. Handles CASE 1 (Direct Service Website) vs CASE 2 (Organization / Group Service Page).
     3. For CASE 2: Inspects target page first for service-specific emails before falling back to full crawling.
     4. For CASE 1: Uses full existing crawling strategy across relevant candidate pages.
+    Returns: (pages_data, crawl_failure_reason, used_fallback_crawl)
     """
     if not base_url:
         logger.debug("[DEBUG] Base URL empty. Crawl stopped.")
-        return [], "Official website not found"
+        return [], "Official website not found", False
 
     target_base = _normalize_url(base_url)
     parsed_base = urlparse(target_base)
@@ -280,6 +281,7 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
     page_statuses: List[int] = []
     discovered_candidate_urls: List[str] = []
     actual_visited_urls: List[str] = []
+    used_fallback_crawl: bool = False
 
     logger.info(f"Starting optimized crawler for base URL: {target_base}")
     logger.debug(f"[DEBUG] Target page visited: {target_base}")
@@ -333,7 +335,7 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
             if not homepage_html:
                 logger.error(f"Failed to load target page DOM for {target_base}: {err_reason}")
                 logger.debug(f"[DEBUG] Exact reason crawl stopped: Target page DOM could not be extracted ({err_reason})")
-                return [], err_reason if err_reason else "Website not reachable"
+                return [], err_reason if err_reason else "Website not reachable", False
 
             # Target page DOM loaded successfully -> Extract content & search emails
             final_url = page.url
@@ -354,11 +356,13 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
 
                 if has_any_page1_email:
                     logger.info(f"CASE 2: Found service-specific email(s) on target page for '{service_name}': {page1_emails_dict}. Skipping organization-wide crawling.")
-                    return pages_data, ""
+                    return pages_data, "", False
                 else:
                     logger.info(f"CASE 2: No service-specific email found on target page for '{service_name}'. Falling back to existing crawling strategy.")
+                    used_fallback_crawl = True
             else:
                 logger.info(f"CASE 1 Detected: '{target_base}' is a Direct Standalone Service Website. Using existing full crawling strategy.")
+                used_fallback_crawl = False
 
             # Log target page emails
             homepage_emails_dict = extract_and_categorize_emails([{"url": final_url, "html": homepage_html, "status": recorded_status}])
@@ -369,7 +373,7 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
             if is_all_categories_found(current_emails):
                 logger.info(f"Early exit triggered on target page for {target_base}: All 5 email categories populated.")
                 logger.debug(f"[DEBUG] Exact reason crawl stopped: Early exit on target page (all 5 categories found)")
-                return pages_data, ""
+                return pages_data, "", used_fallback_crawl
 
             # Step 2: Smart Link Discovery
             soup = BeautifulSoup(homepage_html, "lxml")
@@ -475,7 +479,7 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
                 crawl_reason = "No email found"
 
             logger.debug(f"[DEBUG] Exact reason crawl stopped: Candidate loop finished, result: '{crawl_reason}'")
-            return pages_data, crawl_reason
+            return pages_data, crawl_reason, used_fallback_crawl
 
         finally:
             try:
@@ -486,4 +490,5 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
     except Exception as exc:
         logger.error(f"Playwright execution failed for {target_base}: {exc}")
         logger.debug(f"[DEBUG] Exact reason crawl stopped: Playwright exception ({exc})")
-        return pages_data, "Website not reachable" if not pages_data else "No email found"
+        return pages_data, "Website not reachable" if not pages_data else "No email found", used_fallback_crawl
+

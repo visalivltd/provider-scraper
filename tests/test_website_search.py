@@ -65,9 +65,49 @@ class TestWebsiteSearch(unittest.TestCase):
     def test_classify_result_type(self):
         self.assertEqual(classify_result_type("https://www.cqc.org.uk/location/123", "Title"), "Third-Party / Regulator / Aggregator Page")
         self.assertEqual(classify_result_type("https://www.elder.org/care-homes/123", "Title"), "Third-Party / Regulator / Aggregator Page")
-        self.assertEqual(classify_result_type("https://www.carehome.co.uk/carehome.cfm/searchazref/123", "Title"), "Direct Service Website")
+        self.assertEqual(classify_result_type("https://www.carehome.co.uk/carehome.cfm/searchazref/123", "Title"), "Third-Party / Regulator / Aggregator Page")
         self.assertEqual(classify_result_type("https://www.oaks-carehome.co.uk", "Title"), "Direct Service Website")
+
+    @patch("services.website_search._call_serper_api")
+    def test_greenfield_view_care_home_le5_0tb(self, mock_serper):
+        mock_serper.return_value = [
+            {
+                "title": "Greenfield View Care Home Leicester | CareHome.co.uk",
+                "link": "https://www.carehome.co.uk/carehome.cfm/searchazref/greenfield-view",
+                "snippet": "Details for Greenfield View Care Home in Leicester LE5 0TB."
+            },
+            {
+                "title": "Greenfield View Care Home - Residential Care in Leicester",
+                "link": "https://greenfieldview.co.uk/",
+                "snippet": "Welcome to Greenfield View Care Home in Leicester LE5 0TB."
+            },
+            {
+                "title": "Greenfield View Care Home - CQC",
+                "link": "https://www.cqc.org.uk/location/1-12345678",
+                "snippet": "CQC inspection profile for Greenfield View Care Home LE5 0TB."
+            },
+            {
+                "title": "Greenfield View Care Home - NHS",
+                "link": "https://www.nhs.uk/services/care-home/greenfield-view/123",
+                "snippet": "NHS info for Greenfield View Care Home LE5 0TB."
+            },
+            {
+                "title": "Greenfield View Care Home - CareFind",
+                "link": "https://www.carefind.com/home/greenfield-view",
+                "snippet": "CareFind listing for Greenfield View Care Home LE5 0TB."
+            },
+            {
+                "title": "Greenfield View Care - MyChoice Leicester",
+                "link": "https://mychoice.leicester.gov.uk/Services/4016/Greenfield-View-Care",
+                "snippet": "Leicester Council MyChoice entry for Greenfield View Care LE5 0TB."
+            }
+        ]
+        url = search_service_website("Greenfield View Care Home", postcode="LE5 0TB")
+        self.assertEqual(url, "https://greenfieldview.co.uk/")
+        self.assertNotEqual(url, "https://mychoice.leicester.gov.uk/Services/4016/Greenfield-View-Care")
+        mock_serper.assert_called_with('"Greenfield View Care Home" "LE5 0TB"', max_retries=2)
 
 
 if __name__ == "__main__":
     unittest.main()
+

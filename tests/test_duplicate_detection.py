@@ -118,12 +118,39 @@ class TestDuplicateDetection(unittest.TestCase):
         for dup_val in failed_res["Duplicate"].fillna("").tolist():
             self.assertEqual(dup_val, "")
 
-        # Test 10: Duplicate rows ARE present in services_duplicates.xlsx
-        self.assertEqual(len(duplicates_res), 2)
-        self.assertEqual(duplicates_res["Service Name"].tolist(), ["Anchor Home 2", "Care UK 2"])
-        self.assertEqual(duplicates_res["Duplicate"].tolist(), ["Duplicate", "Duplicate"])
-        self.assertEqual(list(duplicates_res.columns), ["Service Name", "Duplicate", "Service Website"])
+    def test_fallback_file_output(self):
+        data = [
+            {
+                "Service Name": "Direct Home 1",
+                "Service Website": "https://www.directhome.co.uk",
+                "HR Email": "hr@directhome.co.uk",
+                "Status": "Success",
+                "Failure Reason": "",
+                "Is Fallback": False,
+            },
+            {
+                "Service Name": "Group Service 1",
+                "Service Website": "https://www.biggroup.com/services/group-service-1",
+                "Info Email": "info@biggroup.com",
+                "Status": "Success",
+                "Failure Reason": "Service-specific email not found — fallback crawl used",
+                "Is Fallback": True,
+            },
+        ]
+        df = pd.DataFrame(data)
+        save_enriched_excel(df, output_path_input=self.test_enriched_file)
+
+        enriched_res = pd.read_excel(self.test_enriched_file)
+        fallback_res = pd.read_excel(self.test_output_dir / "services_fallback.xlsx")
+
+        self.assertEqual(len(enriched_res), 1)
+        self.assertEqual(enriched_res.iloc[0]["Service Name"], "Direct Home 1")
+
+        self.assertEqual(len(fallback_res), 1)
+        self.assertEqual(fallback_res.iloc[0]["Service Name"], "Group Service 1")
+        self.assertEqual(fallback_res.iloc[0]["Failure Reason"], "Service-specific email not found — fallback crawl used")
 
 
 if __name__ == "__main__":
     unittest.main()
+

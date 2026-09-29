@@ -68,6 +68,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
         "General Email": "",
         "Status": "Failed",
         "Failure Reason": "",
+        "Is Fallback": False,
     }
 
     logger.info(f"[{service_num}/{total_services}] Processing service: '{service_name}' (Postcode: '{postcode or 'N/A'}', Town: '{town or 'N/A'}')")
@@ -108,16 +109,23 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
                         "General Email": cached["General Email"],
                         "Status": cached["Status"],
                         "Failure Reason": cached["Failure Reason"],
+                        "Is Fallback": cached.get("Is Fallback", False),
                     })
                     return service_num, record
 
         # Crawling & Extraction
         is_org_page = is_organization_service_page(website_url, service_name)
-        pages_data, crawl_failure_reason = crawl_website(website_url, service_name=service_name)
+        pages_data, crawl_failure_reason, used_fallback_crawl = crawl_website(website_url, service_name=service_name)
+
+        is_fallback_case = bool(is_org_page and used_fallback_crawl)
+        record["Is Fallback"] = is_fallback_case
 
         if not pages_data:
             record["Status"] = "Failed"
-            record["Failure Reason"] = crawl_failure_reason if crawl_failure_reason else "Website not reachable"
+            if is_fallback_case:
+                record["Failure Reason"] = "Service-specific email not found — fallback crawl used"
+            else:
+                record["Failure Reason"] = crawl_failure_reason if crawl_failure_reason else "Website not reachable"
             logger.warning(f"[{service_num}/{total_services}] Pages crawled: 0. Status: Failed ({record['Failure Reason']})")
         else:
             try:
@@ -136,12 +144,18 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
 
                 if has_any_email:
                     record["Status"] = "Success"
-                    record["Failure Reason"] = ""
+                    if is_fallback_case:
+                        record["Failure Reason"] = "Service-specific email not found — fallback crawl used"
+                    else:
+                        record["Failure Reason"] = ""
                 else:
                     record["Status"] = "Failed"
-                    record["Failure Reason"] = crawl_failure_reason if (crawl_failure_reason and crawl_failure_reason not in {"Website accessible but no email available", "No email found"}) else "No email found"
+                    if is_fallback_case:
+                        record["Failure Reason"] = "Service-specific email not found — fallback crawl used"
+                    else:
+                        record["Failure Reason"] = crawl_failure_reason if (crawl_failure_reason and crawl_failure_reason not in {"Website accessible but no email available", "No email found"}) else "No email found"
 
-                logger.info(f"[{service_num}/{total_services}] Status: {record['Status']} | Reason: '{record['Failure Reason']}'")
+                logger.info(f"[{service_num}/{total_services}] Status: {record['Status']} | Reason: '{record['Failure Reason']}' | Is Fallback: {is_fallback_case}")
 
             except Exception as extract_exc:
                 logger.error(f"[{service_num}/{total_services}] Email extraction failed for {website_url}: {extract_exc}")
@@ -164,7 +178,7 @@ def process_single_service(task_info: Tuple[int, int, dict, bool, bool, bool]) -
 
 def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_services: int, is_final: bool = False) -> None:
     """
-    Saves current in-memory results snapshot to disk (all 4 Excel files).
+    Saves current in-memory results snapshot to disk (all Excel output files).
     ThreadPoolExecutor safe: called ONLY from the main thread.
     """
     if not results_map:
@@ -188,6 +202,7 @@ def _save_checkpoint(df: pd.DataFrame, results_map: Dict[int, dict], total_servi
             row_dict["General Email"] = rec.get("General Email", "")
             row_dict["Status"] = rec.get("Status", "")
             row_dict["Failure Reason"] = rec.get("Failure Reason", "")
+            row_dict["Is Fallback"] = rec.get("Is Fallback", False)
             rows.append(row_dict)
 
         snapshot_df = pd.DataFrame(rows)
@@ -240,6 +255,7 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
                 "General Email": "",
                 "Status": "",
                 "Failure Reason": "",
+                "Is Fallback": False,
             }
         else:
             if norm_url:
@@ -271,6 +287,7 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
                             "General Email": "",
                             "Status": "Failed",
                             "Failure Reason": str(exc),
+                            "Is Fallback": False,
                         }
 
                     completed_count = len(results_map)
@@ -303,8 +320,10 @@ def process_service_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df["General Email"] = [r["General Email"] for r in ordered_results]
     df["Status"] = [r["Status"] for r in ordered_results]
     df["Failure Reason"] = [r["Failure Reason"] for r in ordered_results]
+    df["Is Fallback"] = [r.get("Is Fallback", False) for r in ordered_results]
 
     return df
+
 
 
 def main():
