@@ -124,6 +124,89 @@ IGNORE_KEYWORDS = [
     "creditcontrol",
 ]
 
+# Configurable Third-Party Directory and Unwanted Domains Blocklist
+THIRD_PARTY_DIRECTORY_DOMAINS = [
+    # Care Home Directories & Aggregators
+    "carehomeguide.uk",
+    "carehome.co.uk",
+    "carefind.com",
+    "carefind.co.uk",
+    "carefinder.co.uk",
+    "thecarefinder.co.uk",
+    "carefinder.com",
+    "carefinder",
+    "thecarefinder",
+    "elder.org",
+    "lottie.org",
+    "autumna.co.uk",
+    "carechoices.co.uk",
+    "liveincaredirect.org",
+    "findyourroom.co.uk",
+    "yourcarehome.co.uk",
+    "carehomeos.co.uk",
+    "caresourcer.com",
+    "arrangingafuneral.co.uk",
+    "economicsbydesign.com",
+    "dudleyci.co.uk",
+    "housingcare.org",
+    "allhealthandcare.co.uk",
+    "carehome.co",
+    "care-homes.co.uk",
+    "carehome.me",
+
+    # Regulators, NHS & Govt Directories
+    "cqc.org.uk",
+    "nhs.uk",
+    "nhs.net",
+    "careinspectorate",
+    "ciw.wales",
+    "rqia.org.uk",
+    "ofsted.gov.uk",
+    "food.gov.uk",
+    "companieshouse.gov.uk",
+    "company-information.service.gov.uk",
+    "gov.uk",
+    "gov.scot",
+    "gov.wales",
+
+    # General Business Directories, Property, Accommodation & Real Estate
+    "zoopla.co.uk",
+    "rightmove.co.uk",
+    "onthemarket.com",
+    "yell.com",
+    "thomsonlocal.com",
+    "192.com",
+    "cylex-uk.co.uk",
+    "scoot.co.uk",
+    "allthebusinesses.co.uk",
+    "yelp.com",
+    "yelp.co.uk",
+    "unitestudents.com",
+    "amberstudent.com",
+    "casita.com",
+    "universityliving.com",
+    "studentcrowd.com",
+    "uhomes.com",
+    "sizzlingpubs.co.uk",
+    "gablespub.co.uk",
+
+    # Social Media, Video, Search, Jobs, Reviews
+    "facebook.com",
+    "linkedin.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "instagram.com",
+    "wikipedia.org",
+    "indeed.com",
+    "reed.co.uk",
+    "glassdoor",
+    "trustpilot.com",
+
+    # Multi-tenant directory domains
+    "uk.com",
+]
+
 # Status Constants
 STATUS_SUCCESS = "Success"
 STATUS_WEBSITE_NOT_FOUND = "Website Not Found"

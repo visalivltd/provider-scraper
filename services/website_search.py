@@ -48,9 +48,11 @@ def normalize_text(text: str) -> str:
 
 
 # Comprehensive list of Third-Party / Regulator / Aggregator / Directory / Review / Social Domains
-THIRD_PARTY_INDICATORS = [
+THIRD_PARTY_INDICATORS = getattr(config, "THIRD_PARTY_DIRECTORY_DOMAINS", [
     # Care Home Directories & Aggregators
-    "carehome.co.uk", "carefind.com", "carefind.co.uk", "elder.org", "lottie.org", "autumna.co.uk",
+    "carehomeguide.uk",
+    "carehome.co.uk", "carefind.com", "carefind.co.uk", "carefinder.co.uk", "thecarefinder.co.uk",
+    "carefinder.com", "carefinder", "thecarefinder", "elder.org", "lottie.org", "autumna.co.uk",
     "carechoices.co.uk", "liveincaredirect.org", "findyourroom.co.uk",
     "yourcarehome.co.uk", "carehomeos.co.uk", "caresourcer.com",
     "arrangingafuneral.co.uk", "economicsbydesign.com", "dudleyci.co.uk",
@@ -75,7 +77,7 @@ THIRD_PARTY_INDICATORS = [
 
     # Multi-tenant directory domains
     "uk.com",
-]
+])
 
 
 def classify_result_type(url: str, title: str = "") -> str:
@@ -90,12 +92,15 @@ def classify_result_type(url: str, title: str = "") -> str:
     try:
         parsed = urlparse(url if "://" in url else f"http://{url}")
         netloc = parsed.netloc.lower().split(":")[0].strip(".")
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
 
         if (
             netloc.endswith(".gov.uk")
             or netloc.endswith(".gov")
             or ".gov." in netloc
             or netloc.endswith(".nhs.uk")
+            or netloc.endswith(".nhs.scot")
             or "council" in netloc
         ):
             return "Third-Party / Regulator / Aggregator Page"
@@ -111,6 +116,20 @@ def classify_result_type(url: str, title: str = "") -> str:
         return "Direct Service Website"
     except Exception:
         return "Third-Party / Regulator / Aggregator Page"
+
+
+def is_third_party_domain(url_or_domain: str) -> bool:
+    """
+    Returns True if the given URL, domain, or email address belongs to a third-party directory,
+    regulator, aggregator, listing platform, social media site, or government domain.
+    """
+    if not url_or_domain or not isinstance(url_or_domain, str):
+        return False
+    target = url_or_domain.strip()
+    if "@" in target:
+        target = target.split("@")[-1]
+    return classify_result_type(target) == "Third-Party / Regulator / Aggregator Page"
+
 
 
 def get_root_url_if_homepage(url: str) -> str:

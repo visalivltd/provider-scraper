@@ -112,6 +112,27 @@ def _is_irrelevant_url(url_path: str) -> bool:
     return False
 
 
+def _candidate_url_priority(url: str, text: str = "") -> int:
+    """
+    Assigns crawling priority (lower number = higher priority):
+    1: Contact pages (contact, contact-us, get-in-touch)
+    2: Service-specific pages (locations, care-homes, homes, our-homes, branch)
+    3: About pages (about, about-us, team, our-team, people, staff)
+    4: Recruitment/Careers pages (careers, career, jobs, vacancies, recruitment, work-with-us)
+    5: Other candidate pages
+    """
+    combined = f"{url.lower()} {text.lower()}"
+    if any(k in combined for k in ["contact", "contact-us", "get-in-touch", "enquiries", "reach-us"]):
+        return 1
+    if any(k in combined for k in ["care-home", "locations", "homes", "our-homes", "branch", "service"]):
+        return 2
+    if any(k in combined for k in ["about", "about-us", "team", "people", "staff", "our-team"]):
+        return 3
+    if any(k in combined for k in ["career", "careers", "jobs", "vacancies", "recruitment", "work-with-us"]):
+        return 4
+    return 5
+
+
 def _is_relevant_link(link_text: str, link_url_path: str) -> bool:
     """
     Determines if a link is relevant for email extraction based on anchor text or URL path.
@@ -342,16 +363,36 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
             visited_canonical.add(_canonical(final_url))
             visited_canonical.add(_canonical(target_base))
 
+            target_title = ""
+            try:
+                target_title = page.title()
+            except Exception:
+                pass
+            if not target_title and homepage_html:
+                try:
+                    soup_t = BeautifulSoup(homepage_html, "html.parser")
+                    if soup_t.title and soup_t.title.string:
+                        target_title = soup_t.title.string.strip()
+                except Exception:
+                    pass
+
             recorded_status = status_code if status_code is not None else 200
             page_statuses.append(recorded_status)
-            pages_data.append({"url": final_url, "html": homepage_html, "status": recorded_status})
-            logger.info(f"Page URL: {final_url} | HTTP Status: {recorded_status} | Successfully loaded target page DOM.")
+            pages_data.append({"url": final_url, "html": homepage_html, "status": recorded_status, "title": target_title})
+            logger.info(f"Page URL: {final_url} | HTTP Status: {recorded_status} | Title: '{target_title}' | Successfully loaded target page DOM.")
+
+            # Directory check: avoid crawling third-party directory pages
+            from services.website_search import is_third_party_domain
+            is_third_party = is_third_party_domain(target_base)
+            if is_third_party:
+                logger.info(f"Target URL '{target_base}' is a Third-Party Directory. Only inspecting target page, not crawling internal directory links.")
+                return pages_data, "", False
 
             # CASE 2 Check: Organization / Group / Provider Service Page
             is_org_page = is_organization_service_page(target_base, service_name)
             if is_org_page:
                 logger.info(f"CASE 2 Detected: '{target_base}' is an Organization/Group Service Page for '{service_name}'. Inspecting target page first.")
-                page1_emails_dict = extract_and_categorize_emails(pages_data, service_name=service_name, is_org_page=True)
+                page1_emails_dict = extract_and_categorize_emails(pages_data, service_name=service_name, is_org_page=True, site_url=target_base)
                 has_any_page1_email = any(bool(v.strip()) for v in page1_emails_dict.values())
 
                 if has_any_page1_email:
@@ -365,11 +406,11 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
                 used_fallback_crawl = False
 
             # Log target page emails
-            homepage_emails_dict = extract_and_categorize_emails([{"url": final_url, "html": homepage_html, "status": recorded_status}])
+            homepage_emails_dict = extract_and_categorize_emails([{"url": final_url, "html": homepage_html, "status": recorded_status, "title": target_title}], service_name=service_name, site_url=target_base)
             logger.debug(f"[DEBUG] Emails found on page ({final_url}): {homepage_emails_dict}")
 
             # Early Exit Check after target page
-            current_emails = extract_and_categorize_emails(pages_data)
+            current_emails = extract_and_categorize_emails(pages_data, service_name=service_name, site_url=target_base)
             if is_all_categories_found(current_emails):
                 logger.info(f"Early exit triggered on target page for {target_base}: All 5 email categories populated.")
                 logger.debug(f"[DEBUG] Exact reason crawl stopped: Early exit on target page (all 5 categories found)")
@@ -417,6 +458,9 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
                         discovered_canonical.add(canonical)
                         discovered_candidate_urls.append(common_url)
 
+            # Prioritize candidate URLs by category (contact, service, about, careers first)
+            discovered_candidate_urls.sort(key=lambda u: _candidate_url_priority(u))
+
             logger.debug(f"[DEBUG] Number of links discovered: {len(discovered_canonical)}")
             logger.debug(f"[DEBUG] Candidate URLs generated: {discovered_candidate_urls}")
             logger.info(f"Smart Discovery identified {len(discovered_candidate_urls)} candidate pages to crawl.")
@@ -444,14 +488,28 @@ def crawl_website(base_url: str, service_name: str = "") -> Tuple[List[Dict[str,
                     visited_canonical.add(canonical)
                     visited_canonical.add(_canonical(final_page_url))
                     page_statuses.append(cand_status)
-                    pages_data.append({"url": final_page_url, "html": cand_html, "status": cand_status})
-                    logger.info(f"Page URL: {final_page_url} | HTTP Status: {cand_status} | Successfully crawled page.")
 
-                    cand_emails_dict = extract_and_categorize_emails([{"url": final_page_url, "html": cand_html, "status": cand_status}])
+                    cand_title = ""
+                    try:
+                        cand_title = page.title()
+                    except Exception:
+                        pass
+                    if not cand_title and cand_html:
+                        try:
+                            soup_c = BeautifulSoup(cand_html, "html.parser")
+                            if soup_c.title and soup_c.title.string:
+                                cand_title = soup_c.title.string.strip()
+                        except Exception:
+                            pass
+
+                    pages_data.append({"url": final_page_url, "html": cand_html, "status": cand_status, "title": cand_title})
+                    logger.info(f"Page URL: {final_page_url} | HTTP Status: {cand_status} | Title: '{cand_title}' | Successfully crawled page.")
+
+                    cand_emails_dict = extract_and_categorize_emails([{"url": final_page_url, "html": cand_html, "status": cand_status, "title": cand_title}], service_name=service_name, site_url=target_base)
                     logger.debug(f"[DEBUG] Emails found on page ({final_page_url}): {cand_emails_dict}")
 
                     # Early Exit Check after each page
-                    current_emails = extract_and_categorize_emails(pages_data)
+                    current_emails = extract_and_categorize_emails(pages_data, service_name=service_name, site_url=target_base)
                     if is_all_categories_found(current_emails):
                         logger.info(f"Early exit triggered for {target_base}: All 5 email categories populated.")
                         logger.debug(f"[DEBUG] Exact reason crawl stopped: Early exit on page {final_page_url} (all 5 categories found)")
