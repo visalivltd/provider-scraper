@@ -318,6 +318,94 @@ class TestEmailValidation(unittest.TestCase):
         self.assertEqual(classify_result_type("https://www.carehome.co.uk"), "Third-Party / Regulator / Aggregator Page")
         self.assertEqual(classify_result_type("https://greenfieldview.co.uk"), "Direct Service Website")
 
+    def test_11_partial_fuzzy_and_generic_service_matching(self):
+        """
+        Regression tests covering all 13 required acceptance and rejection examples:
+        - Brook House + info@brookcare.co.uk -> ACCEPT
+        - The Old Rectory Nursing Home + info@oldrectorynursinghome.co.uk -> ACCEPT
+        - Alston House + info@alston-care.co.uk -> ACCEPT
+        - Alston House + info@midlandscare.co.uk -> REJECT
+        - South Collingham Hall + info@collingham.example -> ACCEPT
+        - Parkside + parkside.manager@example.com -> ACCEPT
+        - Parkside + info@park.example -> ACCEPT
+        - Acacia Lodge Care Home + info@lodgecare.example -> ACCEPT
+        - Acacia Lodge Care Home + info@carehome.example -> ACCEPT
+        - Forest Lodge Rest Home + mail@forestlodgecare.com -> ACCEPT
+        - Forest Lodge Rest Home + info@forrestlodgecare.com -> ACCEPT (allowing extra 'r')
+        - Huguenot Place + contact@huguenotcare.example -> ACCEPT
+        - Huguenot Place + info@acuitus.co.uk -> REJECT
+        """
+        test_cases = [
+            ("Brook House", "info@brookcare.co.uk", True, "Distinctive word 'brook' in domain body"),
+            ("The Old Rectory Nursing Home", "info@oldrectorynursinghome.co.uk", True, "Full name components in domain"),
+            ("Alston House", "info@alston-care.co.uk", True, "Distinctive word 'alston' with hyphen in domain"),
+            ("Alston House", "info@midlandscare.co.uk", False, "Unrelated domain 'midlandscare' rejected"),
+            ("South Collingham Hall", "info@collingham.example", True, "Distinctive word 'collingham' (full service name not needed)"),
+            ("Parkside", "parkside.manager@example.com", True, "Exact service name in email username"),
+            ("Parkside", "info@park.example", True, "Prefix stem 'park' of distinctive word 'parkside'"),
+            ("Acacia Lodge Care Home", "info@lodgecare.example", True, "Generic term 'lodge' + 'care' from service name"),
+            ("Acacia Lodge Care Home", "info@carehome.example", True, "Compound generic terms 'care' + 'home' from service name"),
+            ("Forest Lodge Rest Home", "mail@forestlodgecare.com", True, "Distinctive words 'forest' and 'lodge' in domain"),
+            ("Forest Lodge Rest Home", "info@forrestlodgecare.com", True, "Spelling variation with extra 'r' in 'forrest'"),
+            ("Huguenot Place", "contact@huguenotcare.example", True, "Distinctive word 'huguenot' in domain"),
+            ("Huguenot Place", "info@acuitus.co.uk", False, "Unrelated commercial agent/auction domain rejected"),
+        ]
+
+        for service_name, email, should_accept, desc in test_cases:
+            is_match = matches_service_name(email, service_name)
+            domain = email.split("@")[1]
+            is_valid, reason, score = validate_service_email(
+                email=email,
+                service_name=service_name,
+                source_url="https://www.acuitus.co.uk/property/4732/" if "acuitus" in domain else f"https://{domain}",
+                site_url="https://www.acuitus.co.uk/property/4732/" if "acuitus" in domain else f"https://{domain}",
+            )
+
+            if should_accept:
+                self.assertTrue(is_match, f"Expected matches_service_name to be True for '{service_name}' + '{email}' ({desc})")
+                self.assertTrue(is_valid, f"Expected validate_service_email to ACCEPT '{email}' for '{service_name}' ({desc}), got REJECT: {reason}")
+            else:
+                self.assertFalse(is_match, f"Expected matches_service_name to be False for '{service_name}' + '{email}' ({desc})")
+                self.assertFalse(is_valid, f"Expected validate_service_email to REJECT '{email}' for '{service_name}' ({desc}), got ACCEPT: {reason}")
+
+    def test_12_regression_avoid_common_generic_false_positives(self):
+        """
+        Regression tests verifying that single common generic words (care, home, house, hall, place)
+        do not cause unrelated emails to be accepted.
+        """
+        negative_cases = [
+            ("Alston House", "info@care.co.uk", "Generic 'care' not in service name"),
+            ("Alston House", "info@home.co.uk", "Generic 'home' not in service name"),
+            ("Alston House", "info@house.co.uk", "Generic single building word 'house' alone is not sufficient"),
+            ("South Collingham Hall", "info@care.example", "Generic 'care' not in service name"),
+            ("South Collingham Hall", "info@hall.example", "Generic single building word 'hall' alone is not sufficient"),
+            ("Parkside", "info@care.example", "Generic 'care' not in service name"),
+            ("Huguenot Place", "info@care.example", "Generic 'care' not in service name"),
+            ("Huguenot Place", "info@place.example", "Generic single building word 'place' alone is not sufficient"),
+            ("Brook House", "info@midlandscare.co.uk", "Unrelated care group domain"),
+            ("Brook House", "info@care.co.uk", "Generic 'care' alone is not sufficient"),
+            ("Brook House", "info@house.example", "Generic 'house' alone is not sufficient"),
+        ]
+
+        for service_name, email, desc in negative_cases:
+            domain = email.split("@")[1]
+            is_match = matches_service_name(email, service_name)
+            is_valid, reason, score = validate_service_email(
+                email=email,
+                service_name=service_name,
+                source_url=f"https://{domain}",
+                site_url=f"https://{domain}",
+            )
+            self.assertFalse(
+                is_match,
+                f"Expected matches_service_name to REJECT '{email}' for '{service_name}' ({desc})"
+            )
+            self.assertFalse(
+                is_valid,
+                f"Expected validate_service_email to REJECT '{email}' for '{service_name}' ({desc}), got ACCEPT: {reason}"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
+

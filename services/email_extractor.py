@@ -113,7 +113,7 @@ def _get_root_domain(host_or_domain: str) -> str:
     return ".".join(parts[-2:])
 
 
-def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
+def _evaluate_email_validity(email: str, service_name: str = "") -> Tuple[bool, str]:
     """
     Evaluates an email address and returns (is_valid, ignore_reason).
     Filters out emails matching blocked local part keywords (exact & partial match),
@@ -149,6 +149,8 @@ def _evaluate_email_validity(email: str) -> Tuple[bool, str]:
     # Check technical / analytics / social domains
     for tech in TECHNICAL_DOMAINS:
         if domain == tech or domain.endswith(f".{tech}") or tech in domain:
+            if tech in {"example.com", "domain.com"} and service_name and matches_service_name(email_clean, service_name):
+                continue
             return False, f"Technical / analytics / social domain ('{tech}')"
 
     # Check regulator / NHS / gov domains
@@ -171,6 +173,55 @@ GENERIC_ROLE_KEYWORDS = {
     "hello", "hi", "sales", "marketing", "operations", "ops", "finance", "accounts",
     "registered", "deputy", "clinical", "central", "group", "care", "home", "house",
     "service", "services", "membershipservice", "board"
+}
+
+
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """
+    Computes standard Levenshtein edit distance between two strings.
+    """
+    if s1 == s2:
+        return 0
+    if not s1:
+        return len(s2)
+    if not s2:
+        return len(s1)
+
+    previous_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1] + [0] * len(s2)
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row[j + 1] = min(insertions, deletions, substitutions)
+        previous_row = current_row
+
+    return previous_row[-1]
+
+
+def fuzzy_substring_match(word: str, target: str, max_dist: int = 1) -> bool:
+    """
+    Checks if any slice of target matches word with Levenshtein distance <= max_dist.
+    Only called for words of length >= 5.
+    """
+    if not word or not target:
+        return False
+    w_len = len(word)
+    t_len = len(target)
+    for length in (w_len, w_len + 1, w_len - 1):
+        if 1 <= length <= t_len:
+            for start in range(t_len - length + 1):
+                sub = target[start : start + length]
+                if levenshtein_distance(word, sub) <= max_dist:
+                    return True
+    return False
+
+
+TRIVIAL_STOP_WORDS = {"the", "and", "of", "for", "ltd", "limited", "uk", "co", "plc", "st", "saint"}
+COMMON_GENERIC_WORDS = {
+    "care", "home", "house", "hall", "court", "place",
+    "nursing", "residential", "service", "services", "center", "centre"
 }
 
 
@@ -200,37 +251,105 @@ def normalize_name_tokens(name: str) -> List[str]:
     return core_words
 
 
+def _target_matches_service(target: str, service_name: str) -> bool:
+    """
+    Evaluates if a target string (e.g. username or domain body) meaningfully matches the service name.
+    Supports:
+    - Exact full or compact service name match
+    - Distinctive service-name word match (any part of the service name)
+    - Partial prefix / stem match (e.g. 'park' for 'Parkside')
+    - Small spelling variations with edit distance <= 1 (e.g. 'forrest' for 'forest')
+    - Compound generic service terms (e.g. 'carehome' or 'lodgecare' when both words appear in the service name)
+    """
+    if not target or not service_name:
+        return False
+
+    clean_target = re.sub(r'[^a-z0-9]', '', target.lower())
+    if not clean_target or len(clean_target) < 3:
+        return False
+
+    # Extract target tokens separated by punctuation/underscores/dots/hyphens
+    raw_tokens = re.split(r'[^a-z0-9]+', target.lower())
+    target_tokens = [re.sub(r'[^a-z0-9]', '', t) for t in raw_tokens if len(t) >= 3]
+
+    # Clean and split service name
+    clean_service = service_name.lower().replace("&", " and ")
+    service_raw_tokens = re.split(r'[^a-z0-9]+', clean_service)
+    service_tokens = [t for t in service_raw_tokens if len(t) >= 2 and t not in TRIVIAL_STOP_WORDS]
+
+    if not service_tokens:
+        return False
+
+    distinctive_words = [t for t in service_tokens if t not in COMMON_GENERIC_WORDS and len(t) >= 3]
+    all_meaningful_words = [t for t in service_tokens if len(t) >= 3]
+
+    # 1. Compact exact matches
+    compact_distinctive = "".join(distinctive_words)
+    if compact_distinctive and len(compact_distinctive) >= 4 and compact_distinctive in clean_target:
+        return True
+
+    compact_all = "".join(all_meaningful_words)
+    if compact_all and len(compact_all) >= 4 and compact_all in clean_target:
+        return True
+
+    # 2. Distinctive word substring match (any distinctive part of the service name)
+    for w in distinctive_words:
+        if len(w) >= 3 and w in clean_target:
+            return True
+
+    # 3. Partial prefix / stem matching (e.g. 'park' for 'Parkside')
+    all_check_tokens = [clean_target] + target_tokens
+    for w in distinctive_words:
+        if len(w) >= 5:
+            # Check if any target token is a prefix of the distinctive word
+            for tok in all_check_tokens:
+                if len(tok) >= 4 and len(tok) >= (len(w) // 2) and w.startswith(tok):
+                    return True
+            # Check if clean_target starts with a distinctive word prefix of length >= 4
+            for k in range(len(w), 3, -1):
+                if k >= 4 and k >= (len(w) // 2) and clean_target.startswith(w[:k]):
+                    return True
+
+    # 4. Small spelling variations (edit distance <= 1 for distinctive words of length >= 5)
+    for w in distinctive_words:
+        if len(w) >= 5:
+            if fuzzy_substring_match(w, clean_target, max_dist=1):
+                return True
+
+    # 5. Compound of 2+ service words (e.g. 'carehome' or 'lodgecare')
+    # Required when words are individually generic but together form a specific compound from the service name
+    matched_words = [w for w in all_meaningful_words if w in clean_target]
+    if len(matched_words) >= 2:
+        combined_len = sum(len(w) for w in matched_words)
+        if combined_len >= 7:
+            return True
+
+    return False
+
+
 def matches_service_name(email: str, service_name: str) -> bool:
     """
     Checks if an email's local part or domain body meaningfully matches the service name.
-    Normalizes service names and email components (lowercased, punctuation/spaces stripped).
+    Supports partial matches, punctuation differences, and small spelling variations.
     """
     if not email or not service_name or "@" not in email:
         return False
 
     username, domain = email.lower().split("@", 1)
-    clean_username = re.sub(r'[^\w]', '', username)
-
-    domain_body = domain.split(".")[0]
-    clean_domain_body = re.sub(r'[^\w]', '', domain_body)
-
-    core_words = normalize_name_tokens(service_name)
-    compact_core = "".join(core_words)
 
     # 1. Match against local part (username)
-    if compact_core and len(compact_core) >= 3 and compact_core in clean_username:
-        return True
-    if len(core_words) >= 2 and all(w in clean_username for w in core_words):
-        return True
-    if len(core_words) == 1 and len(core_words[0]) >= 4 and core_words[0] in clean_username:
+    if _target_matches_service(username, service_name):
         return True
 
-    # 2. Match against domain body
-    if compact_core and len(compact_core) >= 3 and compact_core in clean_domain_body:
+    # 2. Match against domain body (excluding TLD)
+    root_dom = _get_root_domain(domain)
+    domain_body = root_dom.split(".")[0] if root_dom else domain.split(".")[0]
+    if _target_matches_service(domain_body, service_name):
         return True
-    if len(core_words) >= 2 and all(w in clean_domain_body for w in core_words):
-        return True
-    if len(core_words) == 1 and len(core_words[0]) >= 4 and core_words[0] in clean_domain_body:
+
+    # Also check full domain before first dot if different from root domain body
+    full_domain_body = domain.split(".")[0]
+    if full_domain_body != domain_body and _target_matches_service(full_domain_body, service_name):
         return True
 
     return False
@@ -259,6 +378,8 @@ def check_unrelated_service_or_branch(
     compact_service = "".join(core_service_words)
 
     # If username contains meaningful service name match, it is NOT unrelated
+    if matches_service_name(f"{username}@dummy.com", service_name):
+        return False, ""
     if compact_service and len(compact_service) >= 3 and compact_service in clean_username:
         return False, ""
     if len(core_service_words) >= 2 and all(w in clean_username for w in core_service_words):
@@ -273,7 +394,7 @@ def check_unrelated_service_or_branch(
 
     for token in non_role_tokens:
         # Check if token matches service name
-        if token in core_service_words or (compact_service and token in compact_service):
+        if _target_matches_service(token, service_name) or token in core_service_words or (compact_service and token in compact_service):
             continue
         # Substantial non-role token that is not part of the service name indicates an unrelated branch/service
         if len(token) >= 3:
@@ -336,7 +457,7 @@ def validate_service_email(
     email_clean = email.lower().strip(".,;:\"'()[]")
 
     # 1. Base validity check (regex, dummy blocklist, asset extensions, tech domains, NHS/Gov)
-    is_valid_base, base_reason = _evaluate_email_validity(email_clean)
+    is_valid_base, base_reason = _evaluate_email_validity(email_clean, service_name=service_name)
     if not is_valid_base:
         rejection_reason = "Blocklisted domain" if ("domain" in base_reason.lower() or "blocklist" in base_reason.lower()) else base_reason
         _log_validation(service_name, email_clean, source_url, False, rejection_reason)
@@ -422,21 +543,33 @@ def validate_service_email(
             return True, reason, 85.0
 
         # Generic info/contact email on official site with verified service page
-        if has_page_association:
+        site_domain_matches_service = matches_service_name(f"dummy@{site_root}", service_name)
+        has_surrounding_association = bool(
+            (norm_service and norm_service in surrounding_text.lower())
+            or (service_tokens and any(t in surrounding_text.lower() for t in service_tokens if len(t) >= 4))
+        )
+
+        if site_domain_matches_service and has_page_association:
+            reason = "Generic company email verified on official service-specific page"
+            _log_validation(service_name, email_clean, source_url, True, reason)
+            return True, reason, 80.0
+
+        if has_surrounding_association:
             reason = "Generic company email verified on official service-specific page"
             _log_validation(service_name, email_clean, source_url, True, reason)
             return True, reason, 80.0
 
         # Standalone direct website for service
-        from services.crawler import is_organization_service_page
-        if not is_organization_service_page(target_site, service_name):
-            reason = "Official service-specific domain email"
-            _log_validation(service_name, email_clean, source_url, True, reason)
-            return True, reason, 75.0
+        if site_domain_matches_service:
+            from services.crawler import is_organization_service_page
+            if not is_organization_service_page(target_site, service_name):
+                reason = "Official service-specific domain email"
+                _log_validation(service_name, email_clean, source_url, True, reason)
+                return True, reason, 75.0
 
-        reason = "Unverified generic email"
+        reason = "No verified association with the Service Name"
         _log_validation(service_name, email_clean, source_url, False, reason)
-        return False, "No verified association with the Service Name", 0.0
+        return False, reason, 0.0
 
     # Email domain does not match site domain and doesn't match service name:
     if has_page_association and any(r in username for r in ["info", "contact", "enquiries", "admin", "manager"]):
@@ -655,7 +788,14 @@ def extract_validated_emails(
                 raw_email = href[7:].split("?")[0].strip()
                 raw_email = unquote(raw_email)
                 if raw_email:
-                    surrounding = a_tag.parent.get_text(" ", strip=True) if a_tag.parent else a_tag.get_text(" ", strip=True)
+                    block = a_tag.find_parent(["p", "li", "td", "th", "div", "section", "article", "header", "footer"])
+                    surrounding = block.get_text(" ", strip=True) if block else (a_tag.parent.get_text(" ", strip=True) if a_tag.parent else "")
+                    if len(surrounding) > 300:
+                        idx = surrounding.find(raw_email)
+                        if idx != -1:
+                            surrounding = surrounding[max(0, idx - 150): min(len(surrounding), idx + len(raw_email) + 150)]
+                        else:
+                            surrounding = surrounding[:300]
                     candidate_items.append((raw_email, surrounding))
 
         # 2. Extract emails from raw HTML source
